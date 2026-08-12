@@ -4,7 +4,7 @@ argument-hint: [commit message]
 ---
 
 Wrap up this unit of work — see `git status` + `git diff`, stage what belongs,
-confirm a message, commit via `just commit`. The diff itself is one
+confirm a message, commit via the `cohort-commit` script. The diff itself is one
 `git diff` away; the summary below is for orientation, not to restate it.
 
 ```
@@ -31,11 +31,11 @@ Then work through these — each step is a single sentence, no more:
      body. Count is free, but each bullet must describe one clearly scoped
      change — its kind and why, not file-by-file. *Show it and wait for
      confirmation* — never commit a self-drafted message that wasn't confirmed.
-   - Trailer: `Co-Authored-By: <model name>` — the active model's name.
+   - Trailer: `Co-Authored-By: $(cohort-model-name)` — the active model's name.
    Confirmed → write the message to a temp file, then:
-   `just commit <message-file>`. Never `--no-verify`, `--no-gpg-sign`,
-   `-c commit.gpgsign=false`, or force-amend — if a pre-commit hook fails,
-   fix the issue, `git add -p`, and re-run `just commit`.
+   `<engine>/bin/cohort-commit <message-file>`. Never `--no-verify`,
+   `--no-gpg-sign`, `-c commit.gpgsign=false`, or force-amend — if a
+   pre-commit hook fails, fix the issue, `git add -p`, and re-run.
 5. Verify the commit exists: `git log -1 --oneline` — confirm the hash is
    real and the subject matches. Then report working tree state.
 

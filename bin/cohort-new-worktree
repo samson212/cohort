@@ -1,0 +1,17 @@
+#!/bin/bash
+# cohort-new-worktree: create a git worktree + branch off up-to-date main.
+# Usage: cohort-new-worktree <topic-name>
+# The branch is named agent/<topic> and checked out at $HOME/worktrees/<topic>.
+# Deliberately uses --no-track so a bare 'git push' doesn't push to origin/main.
+set -e
+
+name="$1"
+if [[ -z "$name" ]]; then
+    echo "Usage: cohort-new-worktree <topic-name>" >&2
+    exit 1
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+git fetch origin main
+git worktree add -b "agent/$name" "$HOME/worktrees/$name" origin/main --no-track
+echo "Worktree ready: $HOME/worktrees/$name (branch: agent/$name)"
