@@ -23,7 +23,8 @@ The entrypoint agent. Coordinates subagents, delegates work, and makes
 decisions that require awareness of all conventions. Always present;
 never needs to be told to read docs.
 - Loads: `docs/git-workflow.md`, `docs/agent-roles.md`, `docs/agent-commands.md`
-  (universal — auto-loaded by `hooks/new-conversation`)
+  (universal — auto-loaded by `hooks/system-prompt` on every turn,
+  including subagents)
 - Has: `/git-commit`, `/git-push`
 - Responsibility: route tasks to the right subagent, enforce hard rules
   ("/git-commit is not optional"), keep work scoped to one concern per branch

@@ -1,0 +1,29 @@
+#!/bin/bash
+# system-prompt: auto-inject universal Cohort docs into every system prompt.
+# Fires on every turn (including subagents), so each agent in a Cohort
+# worktree always has universal docs in context.
+# Install: ln -s <repo>/hooks/system-prompt ~/.config/shelley/hooks/system-prompt
+set -e
+
+SELF=$(readlink -f "$0")
+COHORT_ROOT=$(dirname "$(dirname "$SELF")")
+prompt=$(cat)
+
+# Idempotency: if the prompt already has the Cohort marker, pass through.
+[[ "$prompt" == *"[Cohort project"* ]] && { printf '%s\n' "$prompt"; exit 0; }
+
+# Build the auto-load block.
+block="[Cohort project auto-loaded — universal docs are always in context."
+block="${block} Project root: $COHORT_ROOT."
+block="${block} Do NOT ask to read these files — they are already here.]"
+
+NL=$'\n'
+for rel in docs/git-workflow.md docs/agent-roles.md docs/agent-commands.md; do
+    doc="$COHORT_ROOT/$rel"
+    if [[ -f "$doc" ]]; then
+        content=$(< "$doc")
+        block="${block}${NL}${NL}=== ${rel} ===${NL}${content}"
+    fi
+done
+
+printf '%s\n\n---\n\n%s\n' "$block" "$prompt"

@@ -26,3 +26,7 @@ commit message-file:
 # sync-and-confirm steps.
 push:
     git push -u origin $(git branch --show-current)
+# symlink repo hooks into ~/.config/shelley/hooks/ so they fire
+install-hooks:
+    mkdir -p ~/.config/shelley/hooks
+    ln -sf "{{justfile_directory()}}/hooks/system-prompt" ~/.config/shelley/hooks/system-prompt
