@@ -20,7 +20,7 @@ echo ""
 if [[ -d "$ENGINE_DIR/.git" ]]; then
     echo "Engine already cloned at $ENGINE_DIR; fetching latest..."
     git -C "$ENGINE_DIR" fetch origin
-    git -C "$ENGINE_DIR" checkout main 2>/dev/null || true
+    git -C "$ENGINE_DIR" checkout main
     git -C "$ENGINE_DIR" merge --ff-only origin/main 2>/dev/null || \
         git -C "$ENGINE_DIR" reset --hard origin/main
 else
@@ -53,7 +53,7 @@ fi
 
 # ── Add bin to PATH ──────────────────────────────────────────────────────
 
-if [[ ":$PATH:" != *":$HOME/.cohort/bin:"* ]]; then
+if [[ ":$PATH:" != *":$HOME/.cohort/bin:"* && ":$PATH:" != *":~/.cohort/bin:"* ]]; then
     echo ""
     echo "⚠  ~/.cohort/bin is not on your PATH."
     echo "   Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"

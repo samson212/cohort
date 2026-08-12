@@ -19,7 +19,7 @@ Then work through these — each step is a single sentence, no more:
 
 1. Nothing changed → say so and stop.
 2. In one short paragraph, name the **kinds** of files changed and **why**
-   (e.g. "docs + justfile: rename claude→agent, 'save'→'commit'"), with a
+   (e.g. "docs + bin: rename claude→agent, 'save'→'commit'"), with a
    scan-track (staged / unstaged / untracked). Don't enumerate files one by
    one — `git status` already does that.
 3. Stage anything relevant that isn't already (no blind `git add -A`). If

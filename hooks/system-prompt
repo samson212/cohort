@@ -24,7 +24,7 @@ prompt=$(cat)
 
 NL=$'\n'
 AGENT_DIR="$ENGINE_ROOT/agents/cohort"
-PROJECT_ROOT="$PWD"
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
 
 # Build the auto-load reference block.
 block='[Cohort project auto-loaded — universal docs are always in context.
