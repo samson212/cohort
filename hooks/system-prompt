@@ -92,6 +92,10 @@ printf '%s\n\n---\n\n%s\n' "$block" "$prompt"
 
 # Tail: engine prompt.md first, then project prompt.md last (maximum recency).
 if [[ "$prompt" != *"subagent"* ]]; then
-    [[ -n "$prompt_md" ]] && printf '%s\n' "$prompt_md"
-    [[ -n "$PROJECT_PROMPT_MD" ]] && printf '%s\n' "$PROJECT_PROMPT_MD"
+    if [[ -n "$prompt_md" ]]; then
+        printf '%s\n' "$prompt_md"
+    fi
+    if [[ -n "$PROJECT_PROMPT_MD" ]]; then
+        printf '%s\n' "$PROJECT_PROMPT_MD"
+    fi
 fi
