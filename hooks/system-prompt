@@ -17,11 +17,9 @@ AGENT_DIR="$COHORT_ROOT/agents/cohort"
 
 # Build the auto-load reference block (symlinked docs only — no prompt.md).
 # TODO(#1): hardcoded "cohort" — should resolve from env or config.
-read -r -d '' block <<'BLOCK'
-[Cohort project auto-loaded — universal docs are always in context.
+block='[Cohort project auto-loaded — universal docs are always in context.
  Project root: COHORT_ROOT_PLACEHOLDER.
- Do NOT ask to read these files — they are already here.]
-BLOCK
+ Do NOT ask to read these files — they are already here.]'
 block="${block//COHORT_ROOT_PLACEHOLDER/$COHORT_ROOT}"
 
 # Load symlinked docs alphabetically into the reference block
