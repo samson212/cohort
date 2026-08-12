@@ -87,7 +87,9 @@ it. Resuming later means reusing that worktree, not starting over.
 `/git-commit` commits locally only. Use `/git-push` when the branch's work
 is complete — typically after several commits — to sync and publish.
 `/git-push` is standalone: it syncs with the remote, shows what's about to
-go up, and pushes only after confirmation.
+go up, and pushes only after confirmation. Once pushed, use `/git-pr` to
+open a pull request — it reviews the commit set, drafts a title and
+description, and creates the PR after confirmation.
 
 This doesn't mean over-verifying a simple, unambiguous, explicitly-requested
 git command (e.g. a plain "push this") with unrequested pre-flight recon —

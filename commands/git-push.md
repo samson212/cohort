@@ -24,11 +24,13 @@ Only after confirmation: `cohort-push` (which does
 `git push -u origin <branch>`). Never `--force` / `--force-with-lease` —
 that's a separate, usually-unnecessary decision. No confirmation → no push.
 
-After the push succeeds: check for an open PR on this branch (GitHub API:
-`GET /repos/:owner/:repo/pulls?head=:owner::branch`). If one exists, update
-its description with a summary of the branch's work:
-- Read the PR's current body and diff (`GET /repos/:owner/:repo/pulls/:number`).
+After the push succeeds: check for an open PR on this branch (`gh pr list --head
+$(git branch --show-current) --json number,url`). If one exists, update its
+description with a summary of the branch's work:
+- Read the PR's current body and diff (`gh pr view <number> --json body`).
 - Draft an updated body that reflects the current commit set — a one-paragraph
   summary of what the branch does, listing the key changes. Not a commit log.
 - If the current body already matches, leave it alone.
-- Show the draft, wait for confirmation, then PATCH.
+- Show the draft, wait for confirmation, then `gh pr edit <number> --body "..."`.
+
+If no PR exists, note that and suggest `/git-pr` to create one.
