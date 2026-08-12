@@ -1,6 +1,5 @@
 ---
 description: Sync with the remote, show unpushed commits, then push after confirmation
-
 ---
 
 Sync, show what's about to go up, push **only after confirmation**.

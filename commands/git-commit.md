@@ -1,7 +1,6 @@
 ---
 description: Review everything changed, stage what belongs, confirm a message, commit
 argument-hint: [commit message]
-
 ---
 
 Wrap up this unit of work — see `git status` + `git diff`, stage what belongs,

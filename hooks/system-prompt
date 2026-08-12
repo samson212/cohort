@@ -18,12 +18,31 @@ block="${block} Project root: $COHORT_ROOT."
 block="${block} Do NOT ask to read these files — they are already here.]"
 
 NL=$'\n'
-for rel in docs/git-workflow.md docs/agent-roles.md docs/agent-commands.md; do
-    doc="$COHORT_ROOT/$rel"
-    if [[ -f "$doc" ]]; then
-        content=$(< "$doc")
-        block="${block}${NL}${NL}=== ${rel} ===${NL}${content}"
+AGENT_DIR="$COHORT_ROOT/agents/cohort"
+
+# Load prompt.md first if present (context for all agents)
+if [[ -f "$AGENT_DIR/prompt.md" ]]; then
+    content=$(< "$AGENT_DIR/prompt.md")
+    block="${block}${NL}${NL}=== agents/cohort/prompt.md ===${NL}${content}"
+fi
+
+# Then load symlinked docs alphabetically
+for entry in "$AGENT_DIR"/*.md; do
+    [[ -f "$entry" ]] || continue
+    [[ "$(basename "$entry")" == "prompt.md" ]] && continue
+    target="$entry"
+    if [[ -L "$entry" ]]; then
+        target=$(readlink -f "$entry")
     fi
+    content=$(< "$target")
+    rel="${target#$COHORT_ROOT/}"
+    block="${block}${NL}${NL}=== ${rel} ===${NL}${content}"
+done
+
+# Warn about dangling symlinks
+for entry in "$AGENT_DIR"/*.md; do
+    [[ -L "$entry" ]] || continue
+    [[ -f "$entry" ]] || echo "hooks/system-prompt: warning: $entry is a dangling symlink (not loaded)" >&2
 done
 
 printf '%s\n\n---\n\n%s\n' "$block" "$prompt"

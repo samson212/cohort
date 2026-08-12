@@ -54,6 +54,7 @@ and committing split across that increment). Small, frequent commits:
    unstaged, and untracked), can stage more of it right there if some of it
    belongs in this commit, drafts and confirms a message, commits — then
    leaves the push for later, when `/git-push` is invoked.
+
 ### Hard rule: `/git-commit` is not optional
 
 Never run `git commit` directly — under any circumstances, including when
