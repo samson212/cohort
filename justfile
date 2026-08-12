@@ -17,12 +17,12 @@ new-worktree name:
 # /git-commit's flow, after that command's own review/staging/message-draft
 # steps, and before the push steps -- deliberately commit-only, so the
 # git-push sync check can run against a commit that already exists.
-save message-file:
+commit message-file:
     git commit -F {{message-file}}
 
 # push the current branch, creating/refreshing upstream tracking either way
 # (safe to always pass -u: it's a no-op if tracking is already correct).
 # Called from /git-commit's flow, after that command's own /git-push-derived
 # sync-and-confirm steps.
-ship:
+push:
     git push -u origin $(git branch --show-current)

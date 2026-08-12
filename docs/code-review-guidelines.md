@@ -88,3 +88,19 @@ Prefer `from module import specific_name` over `from package import
 module` plus qualified call sites, for this codebase's own internal
 modules. Not retroactively applied to the pre-existing `shared.services`
 convention, which already does the latter — new modules only.
+
+## Naming reduces cognitive load
+
+A name (function, variable, recipe, command, option) should make the
+reader's mental work as small as possible. If a name obscures what it
+does — e.g. `save` for "commit", `ship` for "push" — rename it to match
+the concept. A name is a promise; make the promise obvious.
+
+## Defer to convention when there is doubt
+
+When a choice is ambiguous, prefer the established convention over
+invention. Conventions are the repo's accumulated decisions — the
+default path is the one that already works. Don't add a new pattern
+where an existing one covers the case, and don't silently deviate from
+the documented one. (Example: the commit trailer is always
+`Co-Authored-By: <model name>`, never a hardcoded or invented value.)

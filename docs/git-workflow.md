@@ -1,6 +1,6 @@
 # Git workflow: worktrees, branches, commits, and pushing
 
-How Claude should work in this repo across sessions, not just during code
+How agents should work in this repo across sessions, not just during code
 review.
 
 ## One worktree per task
@@ -12,14 +12,14 @@ dedicated `git worktree` for each task, on its own branch, via:
 just new-worktree <short-topic>
 ```
 
-This fetches the latest `main` and creates `claude/<short-topic>` at
-`/home/user/worktrees/<short-topic>`, deliberately *without* setting up
+This fetches the latest `main` and creates `agent/<short-topic>` at
+`/home/<user>/worktrees/<short-topic>`, deliberately *without* setting up
 branch tracking — branching straight off `origin/main` would otherwise
 silently set `origin/main` itself as the new branch's upstream (git's
 default `autoSetupMerge` behavior), making a bare `git push` push directly
 onto `main`. Don't hand-run the underlying git commands; use the recipe.
 
-Worktrees live under `/home/user/worktrees/`, not inside a session scratchpad
+Worktrees live under `/home/<user>/worktrees/`, not inside a session scratchpad
 — scratchpads are ephemeral and can be cleaned up; parked work should survive
 that. Branch names use the `agent/` prefix already established in this repo.
 
@@ -54,7 +54,6 @@ and committing split across that increment). Small, frequent commits:
    unstaged, and untracked), can stage more of it right there if some of it
    belongs in this commit, drafts and confirms a message, commits, and
    pushes — all in one flow.
-
 ### Hard rule: `/git-commit` is not optional
 
 Never run `git commit` directly — under any circumstances, including when
@@ -79,7 +78,7 @@ it. Resuming later means reusing that worktree, not starting over.
 
 `/git-commit` pushes as its last step, once you've confirmed both the
 commit message and the about-to-push list — this repo's version of "wrap up
-and ship the increment" in one sitting, without skipping the confirmation
+and push the increment" in one sitting, without skipping the confirmation
 pushing deserves (it's visible to others, unlike a local commit).
 `/git-push` still exists standalone for the rare case that falls outside
 that flow — e.g. re-attempting a push that didn't go through, or pushing
