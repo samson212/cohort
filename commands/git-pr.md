@@ -1,52 +1,40 @@
 ---
-description: Open or update a pull request — review branch, surface issues, draft description, create or edit
+description: Create or update a pull request — draft title/description for the current branch's commits
 argument-hint: [--draft]
 ---
 
-Open a pull request for the current branch, or update an existing one if it
-already exists. The branch must already be pushed (use `/git-push` first).
+Create a pull request for the current branch, or update the description of an
+existing one. The branch must already be pushed (use `/git-push` first).
 
-### 1. Prerequisites
+### 1. Check local state
+
+- `git status` → if there are staged, unstaged, or untracked changes, stop.
+  Tell the user to run `/git-commit` and `/git-push` first.
+- `git log --oneline @{u}..HEAD` → unpushed commits. If any exist, stop and
+  tell the user to `/git-push` first.
+
+All local work must be committed and pushed before running this command.
+
+### 2. Identify the PR
 
 - `git branch --show-current` → confirm this is an `agent/*` branch.
-- Check upstream: `git rev-parse --abbrev-ref @{u}` → if no upstream, the
-  branch hasn't been pushed. Stop and tell the user to `/git-push` first.
-- Check for an existing PR:
-  - `gh pr list --head $(git branch --show-current) --json number,title,url,state`
-  - If one exists, note it and continue — the flow below handles both new and
-    existing PRs.
-
-### 2. Review the branch's work
-
 - Determine the default branch:
   - `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
-- Show commits not on the default branch:
-  - `git log --oneline origin/<default>..HEAD`
-- If nothing to PR, say so and stop.
-- Scan the diff (`git diff origin/<default>..HEAD --stat`, then spot-check key
-  files). Call out anything that looks incomplete, out of scope, or diverges
-  from repo conventions. If issues found:
-  - List them succinctly.
-  - **Ask the user**: fix these before opening, or proceed as-is?
-  - If they want fixes, stop here so they can be made.
+- Check for an existing PR:
+  - `gh pr list --head $(git branch --show-current) --json number,title,url,state`
 
-### 3. For an existing PR: check for new commits
+### 3. Decide: create or update?
 
-If a PR already exists, determine whether there are new commits since the last
-update that would warrant a new description:
-- `gh pr view <number> --json commits -q '.commits[].oid'` → the commits
-  currently in the PR on the remote.
-- Compare against `git log --oneline origin/<default>..HEAD`.
-- If there are local commits not yet in the PR:
-  - Note them: "N new commits since the PR was last updated."
-  - They'll need to be pushed (`git push` — standard, non-force). Then the
-    description should be refreshed.
-- If the remote PR already has all local commits but the description is stale
-  (new commits were added by a prior push without updating the PR), note that
-  too.
-- If nothing changed, say so and stop.
+- **No existing PR** → draft a title + description for a new PR (step 4).
+- **Existing PR** → check whether new commits have been pushed since the last
+  description update:
+  - `gh pr view <number> --json commits,body -q '{commits: [.commits[].oid], body: .body}'`
+  - `git log --oneline origin/<default>..HEAD` → the current commit set.
+  - If the PR's commit list already matches HEAD and the description is current
+    (the body reflects the commit set), say so and stop — nothing to do.
+  - Otherwise, draft an updated description (step 4).
 
-### 4. Draft PR title + description
+### 4. Draft title + description
 
 - **Title** (<80 chars): a one-liner summarizing the branch's work — prefix
   with the area if it helps (e.g. "commands: add /git-pr workflow").
@@ -73,11 +61,9 @@ Confirmed →
     --head $(git branch --show-current) \
     [$ARGUMENTS]
   ```
-- **Existing PR** (and commits were already pushed):
+- **Existing PR**:
   ```
   gh pr edit <number> --title "<title>" --body "<body>"
   ```
-- **Existing PR** (new commits not yet pushed): push them first
-  (`git push` — standard, no force), then edit as above.
 
 Report the PR URL and number.
