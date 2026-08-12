@@ -43,7 +43,9 @@ and committing split across that increment). Small, frequent commits:
 **Never amend a pushed commit.** Amending is fine for local-only commits
 (a small fix that doesn't substantively change the commit), but once a
 commit is pushed, `--amend` + force-push breaks any branch other people
-may have fetched. For pushed commits, make a new commit instead.
+may have fetched. To undo a pushed commit, use `git revert` — it creates
+a new commit that inverts the old one, preserving history. For fixes that
+don't undo the commit entirely, make a new commit on top.
 
 ## The loop
 
