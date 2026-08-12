@@ -13,13 +13,13 @@ just new-worktree <short-topic>
 ```
 
 This fetches the latest `main` and creates `agent/<short-topic>` at
-`/home/<user>/worktrees/<short-topic>`, deliberately *without* setting up
+`$HOME/worktrees/<short-topic>`, deliberately *without* setting up
 branch tracking — branching straight off `origin/main` would otherwise
 silently set `origin/main` itself as the new branch's upstream (git's
 default `autoSetupMerge` behavior), making a bare `git push` push directly
 onto `main`. Don't hand-run the underlying git commands; use the recipe.
 
-Worktrees live under `/home/<user>/worktrees/`, not inside a session scratchpad
+Worktrees live under `$HOME/worktrees/`, not inside a session scratchpad
 — scratchpads are ephemeral and can be cleaned up; parked work should survive
 that. Branch names use the `agent/` prefix already established in this repo.
 

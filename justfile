@@ -11,7 +11,7 @@ default:
 # branching directly off a remote ref)
 new-worktree name:
     git fetch origin main
-    git worktree add -b agent/{{name}} /home/user/worktrees/{{name}} origin/main --no-track
+    git worktree add -b agent/{{name}} $HOME/worktrees/{{name}} origin/main --no-track
 
 # commit staged changes using the message in the given file. Called from
 # /git-commit's flow, after that command's own review/staging/message-draft
