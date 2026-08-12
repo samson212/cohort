@@ -1,21 +1,21 @@
 #!/bin/bash
 # cohort-close: cleanup after a merged PR — remove worktree, delete branch,
 # checkout main, and fast-forward to latest.
-# Usage: cohort-close <branch-name> [worktree-path]
+# Usage: cohort-close <project-root> <branch-name> <worktree-path>
 set -e
 
-BRANCH="$1"
-WORKTREE="$2"
+PROJECT_ROOT="$1"
+BRANCH="$2"
+WORKTREE="$3"
 
-if [[ -z "$BRANCH" ]]; then
-    echo "Usage: cohort-close <branch-name> [worktree-path]" >&2
+if [[ -z "$PROJECT_ROOT" || -z "$BRANCH" ]]; then
+    echo "Usage: cohort-close <project-root> <branch-name> <worktree-path>" >&2
     exit 1
 fi
 
-ENGINE_DIR=$(dirname "$(dirname "$(readlink -f "$0")")")
+cd "$PROJECT_ROOT"
 
 # 1. Delete the remote branch
-cd "$ENGINE_DIR"
 git push origin --delete "$BRANCH" 2>/dev/null || echo "(remote branch $BRANCH already deleted or not found)"
 
 # 2. Remove the worktree if given

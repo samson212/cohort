@@ -49,7 +49,7 @@ If unresolved comments exist:
 If the user confirms:
 
 ```
-cohort-close <branch-name> <worktree-path>
+cohort-close $(git rev-parse --show-toplevel) <branch-name> <worktree-path>
 ```
 
 This deletes the remote branch (if it survives), removes the worktree,
