@@ -16,29 +16,39 @@ system-prompt extension.
   way every time — committing, pushing, creating worktrees — live here
   so no agent can improvise around them.
 
-## Roles (to build)
+## Roles
+
+### Cohort (default)
+The entrypoint agent. Coordinates subagents, delegates work, and makes
+decisions that require awareness of all conventions. Always present;
+never needs to be told to read docs.
+- Loads: `docs/git-workflow.md`, `docs/agent-roles.md`, `docs/agent-commands.md`
+  (universal — auto-loaded by `hooks/new-conversation`)
+- Has: `/git-commit`, `/git-push`
+- Responsibility: route tasks to the right subagent, enforce hard rules
+  ("/git-commit is not optional"), keep work scoped to one concern per branch
 
 ### Code reviewer
 Applies the design-doc principles to pull requests and staged changes.
-- Loads: `docs/code-review-guidelines.md`, `docs/git-workflow.md`
+- Loads: universal + `docs/code-review-guidelines.md`
 - Has: `/git-commit`, `/git-push`
 - Responsibility: catch coupling, duplication, dead code, bad names;
   surface principles from findings
 
 ### QA / consistency checker
 Verifies that conventions hold across the repo. Finds drift.
-- Loads: `docs/agent-commands.md`, `docs/git-workflow.md`
+- Loads: universal (already includes agent-commands + git-workflow)
 - Responsibility: detect stale docs, broken cross-references,
   convention violations, "same fact in two places"
 
 ### Bug fixer
 Traces coupling, flags dead code, fixes defects.
-- Loads: `docs/code-review-guidelines.md`
+- Loads: universal + `docs/code-review-guidelines.md`
 - Responsibility: root-cause analysis, minimal fixes, regression-aware
 
 ### Doc maintainer
 Keeps docs coherent as code changes.
-- Loads: `docs/agent-commands.md`, `docs/code-review-guidelines.md`
+- Loads: universal + `docs/code-review-guidelines.md`
 - Responsibility: catch drift between docs and behavior, enforce
   the "one fact, one place" rule across documentation
 
