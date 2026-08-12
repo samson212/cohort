@@ -12,13 +12,17 @@ prompt=$(cat)
 # Idempotency: if the prompt already has the Cohort marker, pass through.
 [[ "$prompt" == *"[Cohort project"* ]] && { printf '%s\n' "$prompt"; exit 0; }
 
-# Build the auto-load block.
-block="[Cohort project auto-loaded — universal docs are always in context."
-block="${block} Project root: $COHORT_ROOT."
-block="${block} Do NOT ask to read these files — they are already here.]"
-
 NL=$'\n'
 AGENT_DIR="$COHORT_ROOT/agents/cohort"
+
+# Build the auto-load block.
+# TODO(#1): hardcoded "cohort" — should resolve from env or config.
+read -r -d '' block <<'BLOCK'
+[Cohort project auto-loaded — universal docs are always in context.
+ Project root: COHORT_ROOT_PLACEHOLDER.
+ Do NOT ask to read these files — they are already here.]
+BLOCK
+block="${block//COHORT_ROOT_PLACEHOLDER/$COHORT_ROOT}"
 
 # Load prompt.md first if present (context for all agents)
 if [[ -f "$AGENT_DIR/prompt.md" ]]; then
