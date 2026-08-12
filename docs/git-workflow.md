@@ -9,7 +9,7 @@ Never do substantive work directly in the primary checkout. Create a
 dedicated `git worktree` for each task, on its own branch, via:
 
 ```
-just new-worktree <short-topic>
+cohort-new-worktree <short-topic>
 ```
 
 This fetches the latest `main` and creates `agent/<short-topic>` at
@@ -17,7 +17,7 @@ This fetches the latest `main` and creates `agent/<short-topic>` at
 branch tracking — branching straight off `origin/main` would otherwise
 silently set `origin/main` itself as the new branch's upstream (git's
 default `autoSetupMerge` behavior), making a bare `git push` push directly
-onto `main`. Don't hand-run the underlying git commands; use the recipe.
+onto `main`. Don't hand-run the underlying git commands; use the script.
 
 Worktrees live under `$HOME/worktrees/`, not inside a session scratchpad
 — scratchpads are ephemeral and can be cleaned up; parked work should survive
@@ -43,7 +43,9 @@ and committing split across that increment). Small, frequent commits:
 **Never amend a pushed commit.** Amending is fine for local-only commits
 (a small fix that doesn't substantively change the commit), but once a
 commit is pushed, `--amend` + force-push breaks any branch other people
-may have fetched. For pushed commits, make a new commit instead.
+may have fetched. To undo a pushed commit, use `git revert` — it creates
+a new commit that inverts the old one, preserving history. For fixes that
+don't undo the commit entirely, make a new commit on top.
 
 ## The loop
 

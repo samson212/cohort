@@ -1,0 +1,29 @@
+#!/bin/bash
+# cohort-update: update the Cohort engine to the latest main.
+# Usage: cohort-update
+#
+# Checks out main and fast-forwards to origin/main. Because worktree-based
+# development happens on agent/* branches in separate worktrees, the main
+# engine directory should always be on main.
+set -e
+
+ENGINE_DIR=$(dirname "$(dirname "$(readlink -f "$0")")")
+
+cd "$ENGINE_DIR"
+
+current_branch=$(git branch --show-current)
+if [[ "$current_branch" != "main" ]]; then
+    echo "Checking out main (was on $current_branch)..."
+    git checkout main
+fi
+
+git fetch origin
+echo "Fast-forwarding to origin/main..."
+if git merge --ff-only origin/main; then
+    echo "Updated: $(git log -1 --oneline)"
+else
+    echo "Cannot fast-forward — local main has diverged from origin/main." >&2
+    echo "This shouldn't happen if development is done in worktrees." >&2
+    echo "Inspect with: git log origin/main..HEAD" >&2
+    exit 1
+fi

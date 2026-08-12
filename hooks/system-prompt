@@ -1,28 +1,41 @@
 #!/bin/bash
-# system-prompt: auto-inject universal Cohort docs into every system prompt.
-# Fires on every turn (including subagents), so each agent in a Cohort
-# worktree always has universal docs in context.
-# Install: ln -s <repo>/hooks/system-prompt ~/.config/shelley/hooks/system-prompt
+# system-prompt: auto-inject Cohort docs into every system prompt.
+# Fires on every turn (including subagents), so each agent always has
+# universal docs in context.
+#
+# Layout:
+#   The hook symlinks to an engine somewhere (e.g. ~/cohort/ or ~/.cohort/).
+#   Engine root is derived from the symlink target, so it works whether the
+#   engine is a real clone or a symlink like ~/.cohort -> ~/cohort.
+#
+#   Project deltas (.cohort/prompt.md, .cohort/docs/*.md) are loaded from
+#   the current working directory when they exist.
+#
+# Install: ~/.cohort/bin/cohort-init (or manually symlink this file into
+#   ~/.config/shelley/hooks/system-prompt).
 set -e
 
 SELF=$(readlink -f "$0")
-COHORT_ROOT=$(dirname "$(dirname "$SELF")")
+ENGINE_ROOT=$(dirname "$(dirname "$SELF")")
 prompt=$(cat)
 
 # Idempotency: if the prompt already has the Cohort marker, pass through.
 [[ "$prompt" == *"[Cohort project"* ]] && { printf '%s\n' "$prompt"; exit 0; }
 
 NL=$'\n'
-AGENT_DIR="$COHORT_ROOT/agents/cohort"
+AGENT_DIR="$ENGINE_ROOT/agents/cohort"
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
 
-# Build the auto-load reference block (symlinked docs only — no prompt.md).
-# TODO(#1): hardcoded "cohort" — should resolve from env or config.
+# Build the auto-load reference block.
 block='[Cohort project auto-loaded — universal docs are always in context.
- Project root: COHORT_ROOT_PLACEHOLDER.
+ Project root: PROJECT_ROOT_PLACEHOLDER
+ Engine:      ENGINE_ROOT_PLACEHOLDER
  Do NOT ask to read these files — they are already here.]'
-block="${block//COHORT_ROOT_PLACEHOLDER/$COHORT_ROOT}"
+block="${block//PROJECT_ROOT_PLACEHOLDER/$PROJECT_ROOT}"
+block="${block//ENGINE_ROOT_PLACEHOLDER/$ENGINE_ROOT}"
 
-# Load symlinked docs alphabetically into the reference block
+# ── Universal docs (engine: agents/cohort/*.md symlinks) ──────────────────
+
 for entry in "$AGENT_DIR"/*.md; do
     [[ -f "$entry" ]] || continue
     [[ "$(basename "$entry")" == "prompt.md" ]] && continue
@@ -31,7 +44,7 @@ for entry in "$AGENT_DIR"/*.md; do
         target=$(readlink -f "$entry")
     fi
     content=$(< "$target")
-    rel="${target#$COHORT_ROOT/}"
+    rel="${target#$ENGINE_ROOT/}"
     block="${block}${NL}${NL}=== ${rel} ===${NL}${content}"
 done
 
@@ -42,15 +55,34 @@ for entry in "$AGENT_DIR"/*.md; do
     [[ -f "$entry" ]] || echo "hooks/system-prompt: warning: $entry is a dangling symlink (not loaded)" >&2
 done
 
-# Load prompt.md separately — it goes at the tail for highest recency.
+# ── Project deltas (.cohort/docs/*.md, .cohort/prompt.md) ────────────────
+
+PROJECT_PROMPT_MD=""
+if [[ -d "$PROJECT_ROOT/.cohort" ]]; then
+    for entry in "$PROJECT_ROOT/.cohort/docs"/*.md; do
+        [[ -f "$entry" ]] || continue
+        content=$(< "$entry")
+        rel=".cohort/docs/$(basename "$entry")"
+        block="${block}${NL}${NL}=== ${rel} ===${NL}${content}"
+    done
+
+    if [[ -f "$PROJECT_ROOT/.cohort/prompt.md" ]]; then
+        PROJECT_PROMPT_MD=$(< "$PROJECT_ROOT/.cohort/prompt.md")
+        PROJECT_PROMPT_MD="=== .cohort/prompt.md (active rules) ===${NL}${NL}${PROJECT_PROMPT_MD}"
+    fi
+fi
+
+# ── Engine prompt.md (for tail) ───────────────────────────────────────────
+
 prompt_md=""
 if [[ -f "$AGENT_DIR/prompt.md" ]]; then
     prompt_md=$(< "$AGENT_DIR/prompt.md")
     prompt_md="=== agents/cohort/prompt.md (active rules) ===${NL}${NL}${prompt_md}"
 fi
 
+# ── Identity override ─────────────────────────────────────────────────────
+
 # Reinforce Cohort identity for the main agent (not subagents).
-# Subagent prompts contain "subagent" — skip identity override for them.
 if [[ "$prompt" != *"subagent"* ]]; then
     prompt="${prompt//You are Shelley/You are Cohort}"
     prompt="${prompt//You are Shelley's subagent/You are Cohort's subagent}"
@@ -58,8 +90,8 @@ fi
 
 printf '%s\n\n---\n\n%s\n' "$block" "$prompt"
 
-# Append prompt.md at the tail for main agent only (not subagents).
-# Tail position maximizes recency — these rules hit last and hardest.
-if [[ "$prompt" != *"subagent"* ]] && [[ -n "$prompt_md" ]]; then
-    printf '%s\n' "$prompt_md"
+# Tail: engine prompt.md first, then project prompt.md last (maximum recency).
+if [[ "$prompt" != *"subagent"* ]]; then
+    [[ -n "$prompt_md" ]] && printf '%s\n' "$prompt_md"
+    [[ -n "$PROJECT_PROMPT_MD" ]] && printf '%s\n' "$PROJECT_PROMPT_MD"
 fi

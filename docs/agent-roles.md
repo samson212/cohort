@@ -39,9 +39,10 @@ provide.
   corresponding slash command is called.
 - **`hooks/`** — Lifecycle. `system-prompt` auto-injects Cohort's context;
   other hooks may follow.
-- **`justfile`** — Executable bottleneck. Recipes that must run the same
-  way every time — committing, pushing, creating worktrees — live here
-  so no agent can improvise around them.
+- **`bin/`** — Executable scripts. Recipes that must run the same way every
+  time — committing, pushing, creating worktrees — live here so no agent
+  can improvise around them. With `~/.cohort/bin` on PATH, any project
+  can call `cohort-new-worktree` etc. directly.
 
 ## Roles
 

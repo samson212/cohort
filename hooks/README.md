@@ -1,10 +1,10 @@
 # Shelley hooks
 
-These scripts live in the repo and are symlinked into
-`~/.config/shelley/hooks/`. Install:
+These scripts live in the engine and are symlinked into
+`~/.config/shelley/hooks/`. Install via:
 
 ```sh
-just install-hooks
+~/.cohort/bin/cohort-init
 ```
 
 ## system-prompt
@@ -15,6 +15,10 @@ The file tree is the source of truth — add a symlink to `agents/cohort/`
 and it loads; remove one and it drops out. Non-symlink files and dangling
 symlinks are warned about and skipped. Idempotent: passes through if docs
 are already present.
+
+The hook also loads project deltas from `.cohort/docs/*.md` and
+`.cohort/prompt.md` when the current project has a `.cohort/` directory.
+The project prompt loads last for maximum recency.
 
 Role-specific docs (e.g. `code-review-guidelines.md`) are not auto-loaded.
 When Cohort spins up a subagent, it tells the subagent to
