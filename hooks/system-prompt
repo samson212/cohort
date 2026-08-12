@@ -30,7 +30,6 @@ PROJECT_ROOT="$PWD"
 block='[Cohort project auto-loaded — universal docs are always in context.
  Project root: PROJECT_ROOT_PLACEHOLDER
  Engine:      ENGINE_ROOT_PLACEHOLDER
- Engine bin:  ENGINE_ROOT_PLACEHOLDER/bin
  Do NOT ask to read these files — they are already here.]'
 block="${block//PROJECT_ROOT_PLACEHOLDER/$PROJECT_ROOT}"
 block="${block//ENGINE_ROOT_PLACEHOLDER/$ENGINE_ROOT}"

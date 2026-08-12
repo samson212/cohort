@@ -9,12 +9,12 @@ projects via a thin `.cohort/` directory.
 ~/cohort/                   # clone the engine here (visible, editable)
 ~/.cohort -> ~/cohort       # symlink — canonical path for tooling
 ~/cohort/
-  bin/
+  bin/                      # scripts (add ~/.cohort/bin to PATH)
   agents/cohort/            # universal prompt.md + symlinked docs
   docs/                     # canonical docs
   commands/                 # slash commands
   hooks/                    # system-prompt hook
-  justfile
+  install.sh                # curl-pipeable installer
 
 ~/my-project/               # Shelley opens HERE
   .cohort/
@@ -29,12 +29,16 @@ identically whether Shelley opens in an engine clone or a project using it.
 ## Bootstrap
 
 ```bash
-# Clone the engine and create the canonical symlink:
-git clone <cohort-repo-url> ~/cohort
-ln -s ~/cohort ~/.cohort
+curl -sSL https://raw.githubusercontent.com/samson212/cohort/main/install.sh | bash
+```
 
-# From any project root:
-~/.cohort/bin/cohort-init
+This clones the engine to `~/cohort`, creates `~/.cohort -> ~/cohort`,
+and checks that `~/.cohort/bin` is on your PATH.
+
+Then, from any project root:
+
+```bash
+cohort-init
 ```
 
 This scaffolds `.cohort/` and installs the system-prompt hook. The hook
@@ -44,8 +48,10 @@ loads universal docs from the engine, then layers on `.cohort/` deltas
 ## Keeping the engine updated
 
 ```bash
-cd ~/cohort && git pull
+cohort-update
 ```
+
+Checks out main and fast-forwards to `origin/main`.
 
 All projects pick up the update immediately — no per-project migration.
 
@@ -58,8 +64,8 @@ All projects pick up the update immediately — no per-project migration.
   the project get the same Cohort prompts. The engine itself is a personal
   tooling choice (like your editor or shell config) — each dev installs it
   on their VM.
-- **Scripts live in `bin/`, not just in `justfile`.** Any project can call
-  `cohort-new-worktree` regardless of whether it uses `just`. The `justfile`
-  is a thin convenience layer.
+- **Scripts live in `bin/`.** With `~/.cohort/bin` on PATH, any project
+  can call `cohort-new-worktree` etc. directly — no dependency on a
+  particular task runner.
 - **Project prompt.md is the tail position** — it loads last, so it can
   override or augment anything in the universal set.

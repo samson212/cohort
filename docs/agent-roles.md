@@ -41,10 +41,8 @@ provide.
   other hooks may follow.
 - **`bin/`** — Executable scripts. Recipes that must run the same way every
   time — committing, pushing, creating worktrees — live here so no agent
-  can improvise around them.
-- **`justfile`** — Optional convenience wrappers that delegate to `bin/`.
-  Projects that use `just` can call `just new-worktree` etc.; the scripts
-  also work standalone.
+  can improvise around them. With `~/.cohort/bin` on PATH, any project
+  can call `cohort-new-worktree` etc. directly.
 
 ## Roles
 
