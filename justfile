@@ -18,11 +18,6 @@ commit message-file:
 push:
     {{justfile_directory()}}/bin/cohort-push
 
-# symlink repo hooks into ~/.config/shelley/hooks/ so they fire
-install-hooks:
-    mkdir -p ~/.config/shelley/hooks
-    ln -sf "{{justfile_directory()}}/hooks/system-prompt" ~/.config/shelley/hooks/system-prompt
-
 # bootstrap Cohort into a project. Run from the project root.
 init:
     {{justfile_directory()}}/bin/cohort-init

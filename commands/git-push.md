@@ -20,7 +20,7 @@ Sync, show what's about to go up, push **only after confirmation**.
   upstream it targets (`<remote>/<branch>`). If nothing to push, say so, stop.
 - Present branch/target + commit list, **wait for confirmation**.
 
-Only after confirmation: `<engine>/bin/cohort-push` (which does
+Only after confirmation: `cohort-push` (which does
 `git push -u origin <branch>`). Never `--force` / `--force-with-lease` —
 that's a separate, usually-unnecessary decision. No confirmation → no push.
 

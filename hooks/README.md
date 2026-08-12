@@ -1,11 +1,9 @@
 # Shelley hooks
 
-These scripts live in the repo and are symlinked into
-`~/.config/shelley/hooks/`. Install:
+These scripts live in the engine and are symlinked into
+`~/.config/shelley/hooks/`. Install via:
 
 ```sh
-just install-hooks
-# or, from a target project:
 ~/.cohort/bin/cohort-init
 ```
 
@@ -18,8 +16,8 @@ and it loads; remove one and it drops out. Non-symlink files and dangling
 symlinks are warned about and skipped. Idempotent: passes through if docs
 are already present.
 
-In installed mode (`~/.cohort/` exists), the hook also loads project deltas
-from `.cohort/docs/*.md` and `.cohort/prompt.md` in the target project root.
+The hook also loads project deltas from `.cohort/docs/*.md` and
+`.cohort/prompt.md` when the current project has a `.cohort/` directory.
 The project prompt loads last for maximum recency.
 
 Role-specific docs (e.g. `code-review-guidelines.md`) are not auto-loaded.

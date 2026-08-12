@@ -33,7 +33,7 @@ Then work through these — each step is a single sentence, no more:
      confirmation* — never commit a self-drafted message that wasn't confirmed.
    - Trailer: `Co-Authored-By: $(cohort-model-name)` — the active model's name.
    Confirmed → write the message to a temp file, then:
-   `<engine>/bin/cohort-commit <message-file>`. Never `--no-verify`,
+   `cohort-commit <message-file>`. Never `--no-verify`,
    `--no-gpg-sign`, `-c commit.gpgsign=false`, or force-amend — if a
    pre-commit hook fails, fix the issue, `git add -p`, and re-run.
 5. Verify the commit exists: `git log -1 --oneline` — confirm the hash is

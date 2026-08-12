@@ -2,9 +2,9 @@
 # cohort-init: bootstrap Cohort into a target project.
 # Run from the project root. Installs the shelley hook and scaffolds .cohort/.
 #
-# The Cohort engine lives at ~/.cohort/. This script derives that path
-# from its own location, so it works whether ~/.cohort/ is a clone,
-# a symlink to a sibling repo, or a subdirectory.
+# The Cohort engine lives wherever you cloned it (e.g. ~/cohort/).
+# A symlink ~/.cohort -> ~/cohort is the recommended convention so
+# tooling finds it at a predictable path while keeping the repo visible.
 #
 # Usage: ~/.cohort/bin/cohort-init [project-name]
 #   project-name defaults to the current directory's basename.
@@ -15,8 +15,8 @@ ENGINE_ROOT=$(dirname "$SCRIPT_DIR")
 PROJECT_ROOT="$PWD"
 PROJECT_NAME="${1:-$(basename "$PROJECT_ROOT")}"
 
-if [[ ! -d "$PROJECT_ROOT/.git" ]]; then
-    echo "Error: $PROJECT_ROOT is not a git repository. Run this from a project root." >&2
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Error: not inside a git repository. Run this from a project root." >&2
     exit 1
 fi
 
@@ -26,30 +26,38 @@ echo "  Project: $PROJECT_ROOT"
 
 # 1. Scaffold .cohort/ with a template prompt.md
 mkdir -p "$PROJECT_ROOT/.cohort/docs"
+touch "$PROJECT_ROOT/.cohort/docs/.gitkeep"
 if [[ ! -f "$PROJECT_ROOT/.cohort/prompt.md" ]]; then
-    cat > "$PROJECT_ROOT/.cohort/prompt.md" << 'PROMPTEOF'
+    cat > "$PROJECT_ROOT/.cohort/prompt.md" << PROMPTEOF
 # Project context
 
 TODO: describe this project — what it does, its tech stack, key conventions,
 and anything Cohort should know when working here. This file is the delta on
 top of Cohort's universal docs; keep it project-specific.
 
-The project is called PROJECT_NAME_PLACEHOLDER.
+The project is called ${PROJECT_NAME}.
 PROMPTEOF
-    # Replace the placeholder
-    sed -i "s/PROJECT_NAME_PLACEHOLDER/$PROJECT_NAME/" "$PROJECT_ROOT/.cohort/prompt.md"
-    echo "  Created .cohort/prompt.md"
+    echo "Created .cohort/prompt.md"
 else
-    echo "  .cohort/prompt.md already exists, skipping"
+    echo ".cohort/prompt.md already exists, skipping"
 fi
 
 # 2. Install the shelley hook
-mkdir -p ~/.config/shelley/hooks
-if [[ -L ~/.config/shelley/hooks/system-prompt ]]; then
-    echo "  Hook already installed: ~/.config/shelley/hooks/system-prompt"
+HOOK_SRC="$ENGINE_ROOT/hooks/system-prompt"
+HOOK_DST="$HOME/.config/shelley/hooks/system-prompt"
+mkdir -p "$(dirname "$HOOK_DST")"
+if [[ -L "$HOOK_DST" ]]; then
+    CURRENT_TARGET=$(readlink -f "$HOOK_DST")
+    WANTED_TARGET=$(readlink -f "$HOOK_SRC")
+    if [[ "$CURRENT_TARGET" == "$WANTED_TARGET" ]]; then
+        echo "Hook already installed: $HOOK_DST"
+    else
+        ln -sf "$HOOK_SRC" "$HOOK_DST"
+        echo "Hook relinked: $HOOK_DST -> $HOOK_SRC (was -> $CURRENT_TARGET)"
+    fi
 else
-    ln -sf "$ENGINE_ROOT/hooks/system-prompt" ~/.config/shelley/hooks/system-prompt
-    echo "  Installed hook: ~/.config/shelley/hooks/system-prompt -> $ENGINE_ROOT/hooks/system-prompt"
+    ln -sf "$HOOK_SRC" "$HOOK_DST"
+    echo "Installed hook: $HOOK_DST -> $HOOK_SRC"
 fi
 
 echo ""

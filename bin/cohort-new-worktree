@@ -12,6 +12,21 @@ if [[ -z "$name" ]]; then
 fi
 
 cd "$(git rev-parse --show-toplevel)"
-git fetch origin main
-git worktree add -b "agent/$name" "$HOME/worktrees/$name" origin/main --no-track
+git fetch origin
+# Resolve the default branch (e.g. main, master) from the remote HEAD symref.
+default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||')
+if [[ -z "$default_branch" ]]; then
+    # Fallback: if origin/HEAD isn't set, try common names.
+    for candidate in main master; do
+        if git show-ref --verify --quiet "refs/remotes/origin/$candidate"; then
+            default_branch="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "$default_branch" ]]; then
+    echo "Error: could not determine default branch. Set it with: git remote set-head origin -a" >&2
+    exit 1
+fi
+git worktree add -b "agent/$name" "$HOME/worktrees/$name" "origin/$default_branch" --no-track
 echo "Worktree ready: $HOME/worktrees/$name (branch: agent/$name)"

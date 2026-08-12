@@ -1,10 +1,11 @@
 #!/bin/bash
 # cohort-model-name: print the active model name for commit trailers.
-# Pulls from SHELLEY_MODEL env var.
+# Pulls from SHELLEY_MODEL env var. Exits non-zero if unavailable.
 set -e
 
 if [[ -n "$SHELLEY_MODEL" ]]; then
     printf '%s\n' "$SHELLEY_MODEL"
 else
-    echo "unknown-model"
+    echo "cohort-model-name: SHELLEY_MODEL not set" >&2
+    exit 1
 fi

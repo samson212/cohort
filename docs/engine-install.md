@@ -1,16 +1,14 @@
-=== docs/engine-install.md ===
 # Engine installation model
 
-Cohort can operate in two modes:
+Cohort is an engine you install once per VM and deploy into individual
+projects via a thin `.cohort/` directory.
 
-## Installed mode (recommended for project work)
-
-Cohort lives at `~/.cohort/` on the VM — cloned once and shared across all
-projects. Each target project gets a thin `.cohort/` directory with only
-project-specific deltas (`prompt.md`, optional `docs/*.md`).
+## Layout
 
 ```
-~/.cohort/                  # the engine (clone, symlink, or submodule)
+~/cohort/                   # clone the engine here (visible, editable)
+~/.cohort -> ~/cohort       # symlink — canonical path for tooling
+~/cohort/
   bin/
   agents/cohort/            # universal prompt.md + symlinked docs
   docs/                     # canonical docs
@@ -25,35 +23,37 @@ project-specific deltas (`prompt.md`, optional `docs/*.md`).
   src/...
 ```
 
-### Bootstrap
+The hook derives the engine root from its own symlink chain, so it works
+identically whether Shelley opens in an engine clone or a project using it.
+
+## Bootstrap
 
 ```bash
-# From the target project root:
+# Clone the engine and create the canonical symlink:
+git clone <cohort-repo-url> ~/cohort
+ln -s ~/cohort ~/.cohort
+
+# From any project root:
 ~/.cohort/bin/cohort-init
 ```
 
 This scaffolds `.cohort/` and installs the system-prompt hook. The hook
-detects `~/.cohort/`, loads universal docs from there, then layers on
-`.cohort/` deltas (project prompt at highest recency).
+loads universal docs from the engine, then layers on `.cohort/` deltas
+(project prompt at highest recency).
 
-### Keeping the engine updated
+## Keeping the engine updated
 
 ```bash
-cd ~/.cohort && git pull
+cd ~/cohort && git pull
 ```
 
 All projects pick up the update immediately — no per-project migration.
 
-## Self-hosted mode
-
-Cohort is its own project. The hook derives the engine root from its own
-location (`hooks/system-prompt` → repo root). This is the fallback when
-`~/.cohort/` doesn't exist.
-
 ## Design decisions
 
-- **`~/.cohort/` is the single source of truth for universal docs.**
-  No copies, no per-project symlink farms.
+- **The engine derives from the hook symlink, not `~/.cohort/` detection.**
+  Open Shelley in `~/cohort/` to hack on Cohort itself; open Shelley in
+  `~/my-project/` to work on that project. Both load the same universal docs.
 - **`.cohort/` is committed to the target project.** Other developers on
   the project get the same Cohort prompts. The engine itself is a personal
   tooling choice (like your editor or shell config) — each dev installs it

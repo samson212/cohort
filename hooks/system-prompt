@@ -3,28 +3,20 @@
 # Fires on every turn (including subagents), so each agent always has
 # universal docs in context.
 #
-# Installed mode (recommended):
-#   Engine lives at ~/.cohort/ (clone, symlink, or submodule).
-#   Project deltas live at .cohort/ in the project root.
-#   Install: ~/.cohort/bin/cohort-init
+# Layout:
+#   The hook symlinks to an engine somewhere (e.g. ~/cohort/ or ~/.cohort/).
+#   Engine root is derived from the symlink target, so it works whether the
+#   engine is a real clone or a symlink like ~/.cohort -> ~/cohort.
 #
-# Self-hosted mode (fallback):
-#   Cohort is its own project. Derives engine root from hook location.
+#   Project deltas (.cohort/prompt.md, .cohort/docs/*.md) are loaded from
+#   the current working directory when they exist.
 #
-# The hook links into ~/.config/shelley/hooks/system-prompt.
+# Install: ~/.cohort/bin/cohort-init (or manually symlink this file into
+#   ~/.config/shelley/hooks/system-prompt).
 set -e
 
 SELF=$(readlink -f "$0")
-
-# Determine engine root:
-# 1. ~/.cohort/ exists → installed mode (Cohort is an engine, PWD is the target project).
-# 2. Otherwise → self-hosted mode (Cohort is the project being worked on).
-if [[ -d "$HOME/.cohort" ]]; then
-    ENGINE_ROOT=$(readlink -f "$HOME/.cohort")
-else
-    ENGINE_ROOT=$(dirname "$(dirname "$SELF")")
-fi
-
+ENGINE_ROOT=$(dirname "$(dirname "$SELF")")
 prompt=$(cat)
 
 # Idempotency: if the prompt already has the Cohort marker, pass through.
@@ -37,7 +29,8 @@ PROJECT_ROOT="$PWD"
 # Build the auto-load reference block.
 block='[Cohort project auto-loaded — universal docs are always in context.
  Project root: PROJECT_ROOT_PLACEHOLDER
- Engine:     ENGINE_ROOT_PLACEHOLDER
+ Engine:      ENGINE_ROOT_PLACEHOLDER
+ Engine bin:  ENGINE_ROOT_PLACEHOLDER/bin
  Do NOT ask to read these files — they are already here.]'
 block="${block//PROJECT_ROOT_PLACEHOLDER/$PROJECT_ROOT}"
 block="${block//ENGINE_ROOT_PLACEHOLDER/$ENGINE_ROOT}"
@@ -63,7 +56,7 @@ for entry in "$AGENT_DIR"/*.md; do
     [[ -f "$entry" ]] || echo "hooks/system-prompt: warning: $entry is a dangling symlink (not loaded)" >&2
 done
 
-# ── Project deltas (.cohort/docs/*.md) ───────────────────────────────────
+# ── Project deltas (.cohort/docs/*.md, .cohort/prompt.md) ────────────────
 
 PROJECT_PROMPT_MD=""
 if [[ -d "$PROJECT_ROOT/.cohort" ]]; then
