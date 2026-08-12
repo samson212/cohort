@@ -40,6 +40,11 @@ and committing split across that increment). Small, frequent commits:
 - give a clean rollback point if a later step turns out wrong
 - let work be "parked" mid-task without losing granularity
 
+**Never amend a pushed commit.** Amending is fine for local-only commits
+(a small fix that doesn't substantively change the commit), but once a
+commit is pushed, `--amend` + force-push breaks any branch other people
+may have fetched. For pushed commits, make a new commit instead.
+
 ## The loop
 
 1. **Work** — make one focused change.
