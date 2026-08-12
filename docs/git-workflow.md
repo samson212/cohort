@@ -52,8 +52,8 @@ and committing split across that increment). Small, frequent commits:
 3. Repeat until the task's scope is done, or it's a good point to wrap up.
 4. **Wrap up with `/git-commit`** — it looks at everything (staged,
    unstaged, and untracked), can stage more of it right there if some of it
-   belongs in this commit, drafts and confirms a message, commits, and
-   pushes — all in one flow.
+   belongs in this commit, drafts and confirms a message, commits — then
+   leaves the push for later, when `/git-push` is invoked.
 ### Hard rule: `/git-commit` is not optional
 
 Never run `git commit` directly — under any circumstances, including when
@@ -76,13 +76,10 @@ it. Resuming later means reusing that worktree, not starting over.
 
 ## Pushing
 
-`/git-commit` pushes as its last step, once you've confirmed both the
-commit message and the about-to-push list — this repo's version of "wrap up
-and push the increment" in one sitting, without skipping the confirmation
-pushing deserves (it's visible to others, unlike a local commit).
-`/git-push` still exists standalone for the rare case that falls outside
-that flow — e.g. re-attempting a push that didn't go through, or pushing
-commits that were made outside `/git-commit`.
+`/git-commit` commits locally only. Use `/git-push` when the branch's work
+is complete — typically after several commits — to sync and publish.
+`/git-push` is standalone: it syncs with the remote, shows what's about to
+go up, and pushes only after confirmation.
 
 This doesn't mean over-verifying a simple, unambiguous, explicitly-requested
 git command (e.g. a plain "push this") with unrequested pre-flight recon —

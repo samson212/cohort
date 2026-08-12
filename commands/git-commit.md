@@ -1,13 +1,12 @@
 ---
-description: Review everything changed, stage what belongs, confirm a message, commit, push
+description: Review everything changed, stage what belongs, confirm a message, commit
 argument-hint: [commit message]
 
 ---
 
 Wrap up this unit of work — see `git status` + `git diff`, stage what belongs,
-confirm a message, commit via `just commit`, sync and push via `just push`. The
-diff itself is one `git diff` away; the summary below is for orientation, not
-to restate it.
+confirm a message, commit via `just commit`. The diff itself is one
+`git diff` away; the summary below is for orientation, not to restate it.
 
 ```
 git status
@@ -38,8 +37,8 @@ Then work through these — each step is a single sentence, no more:
    `just commit <message-file>`. Never `--no-verify`, `--no-gpg-sign`,
    `-c commit.gpgsign=false`, or force-amend — if a pre-commit hook fails,
    fix the issue, `git add -p`, and re-run `just commit`.
-5. Now run `/git-push`'s sync-and-confirm procedure against this new commit
-   (the message confirmation is *not* push authorization — that's a separate
-   nod). On confirmation: `just push`.
+5. Verify the commit exists: `git log -1 --oneline` — confirm the hash is
+   real and the subject matches. Then report working tree state.
 
-After it runs: confirm the working tree is clean (or show what remains).
+Push is separate. Use `/git-push` when ready to publish — typically after
+several commits, when the branch's work is complete.
