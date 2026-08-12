@@ -93,3 +93,20 @@ This doesn't mean over-verifying a simple, unambiguous, explicitly-requested
 git command (e.g. a plain "push this") with unrequested pre-flight recon —
 reserve that instinct for genuinely ambiguous or destructive operations;
 `/git-push`'s own confirmation step already covers the ordinary case.
+
+## Closing a PR
+
+When a branch's work is complete and its PR is approved, use `/git-close`.
+It:
+
+1. Identifies the PR (from arguments or the current branch).
+2. Scans for unresolved actionable comments — if found, lists them and asks
+   whether a re-review is needed before merging.
+3. Merges (squash by default, via `gh pr merge`).
+4. After confirmation, runs `cohort-close` to delete the remote branch,
+   remove the worktree, delete the local branch, and fast-forward main to
+   the latest `origin/main`.
+
+`/git-close` does not push. The branch should already be pushed and the PR
+open before this command runs. If the merge fails (conflicts, failing
+checks), stop — do not force.

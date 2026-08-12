@@ -1,0 +1,41 @@
+#!/bin/bash
+# cohort-close: cleanup after a merged PR — remove worktree, delete branch,
+# checkout main, and fast-forward to latest.
+# Usage: cohort-close <branch-name> [worktree-path]
+set -e
+
+BRANCH="$1"
+WORKTREE="$2"
+
+if [[ -z "$BRANCH" ]]; then
+    echo "Usage: cohort-close <branch-name> [worktree-path]" >&2
+    exit 1
+fi
+
+ENGINE_DIR=$(dirname "$(dirname "$(readlink -f "$0")")")
+
+# 1. Delete the remote branch
+cd "$ENGINE_DIR"
+git push origin --delete "$BRANCH" 2>/dev/null || echo "(remote branch $BRANCH already deleted or not found)"
+
+# 2. Remove the worktree if given
+if [[ -n "$WORKTREE" && -d "$WORKTREE/.git" ]]; then
+    git worktree remove "$WORKTREE" 2>/dev/null || git worktree remove --force "$WORKTREE"
+    echo "Removed worktree: $WORKTREE"
+fi
+
+# 3. Prune the branch locally (it's merged, so safe to force-delete)
+git branch -D "$BRANCH" 2>/dev/null || echo "(local branch $BRANCH already deleted)"
+
+# 4. Checkout main and fast-forward
+current=$(git branch --show-current)
+if [[ "$current" != "main" ]]; then
+    git checkout main
+fi
+git fetch origin
+if git merge --ff-only origin/main; then
+    echo "main is now at: $(git log -1 --oneline)"
+else
+    echo "Warning: main could not fast-forward. Inspect with: git log origin/main..HEAD" >&2
+    exit 1
+fi

@@ -49,7 +49,7 @@ provide.
 ### Cohort (default)
 The entrypoint agent. Coordinates subagents, delegates work, and makes
 decisions that require awareness of all conventions.
-- Has: `/git-commit`, `/git-push`
+- Has: `/git-commit`, `/git-push`, `/git-close`
 - Universal docs: `agents/cohort/` (auto-loaded by `hooks/system-prompt` on
   every turn, including subagents) — symlinked into this directory
 
