@@ -15,7 +15,7 @@ prompt=$(cat)
 NL=$'\n'
 AGENT_DIR="$COHORT_ROOT/agents/cohort"
 
-# Build the auto-load block.
+# Build the auto-load reference block (symlinked docs only — no prompt.md).
 # TODO(#1): hardcoded "cohort" — should resolve from env or config.
 read -r -d '' block <<'BLOCK'
 [Cohort project auto-loaded — universal docs are always in context.
@@ -24,13 +24,7 @@ read -r -d '' block <<'BLOCK'
 BLOCK
 block="${block//COHORT_ROOT_PLACEHOLDER/$COHORT_ROOT}"
 
-# Load prompt.md first if present (context for all agents)
-if [[ -f "$AGENT_DIR/prompt.md" ]]; then
-    content=$(< "$AGENT_DIR/prompt.md")
-    block="${block}${NL}${NL}=== agents/cohort/prompt.md ===${NL}${content}"
-fi
-
-# Then load symlinked docs alphabetically
+# Load symlinked docs alphabetically into the reference block
 for entry in "$AGENT_DIR"/*.md; do
     [[ -f "$entry" ]] || continue
     [[ "$(basename "$entry")" == "prompt.md" ]] && continue
@@ -46,7 +40,28 @@ done
 # Warn about dangling symlinks
 for entry in "$AGENT_DIR"/*.md; do
     [[ -L "$entry" ]] || continue
+    [[ "$(basename "$entry")" == "prompt.md" ]] && continue
     [[ -f "$entry" ]] || echo "hooks/system-prompt: warning: $entry is a dangling symlink (not loaded)" >&2
 done
 
+# Load prompt.md separately — it goes at the tail for highest recency.
+prompt_md=""
+if [[ -f "$AGENT_DIR/prompt.md" ]]; then
+    prompt_md=$(< "$AGENT_DIR/prompt.md")
+    prompt_md="=== agents/cohort/prompt.md (active rules) ===${NL}${NL}${prompt_md}"
+fi
+
+# Reinforce Cohort identity for the main agent (not subagents).
+# Subagent prompts contain "subagent" — skip identity override for them.
+if [[ "$prompt" != *"subagent"* ]]; then
+    prompt="${prompt//You are Shelley/You are Cohort}"
+    prompt="${prompt//You are Shelley's subagent/You are Cohort's subagent}"
+fi
+
 printf '%s\n\n---\n\n%s\n' "$block" "$prompt"
+
+# Append prompt.md at the tail for main agent only (not subagents).
+# Tail position maximizes recency — these rules hit last and hardest.
+if [[ "$prompt" != *"subagent"* ]] && [[ -n "$prompt_md" ]]; then
+    printf '%s\n' "$prompt_md"
+fi
