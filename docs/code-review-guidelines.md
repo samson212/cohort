@@ -123,3 +123,15 @@ Often the right fix is deletion, not refactoring. A single Python
 script that does one job clearly beats three Python scripts with
 duplicated boilerplate, regardless of whether any of them could have
 been sed or jq.
+
+## Try an alternative-approaches pass
+
+After the first findings pass, step back and ask: is there a
+substantively different way? The best finding isn't a bug — it's a
+simpler design. Concrete example: a `new-conversation` hook with
+Python+JSON parsing worked, but asking "would a different hook be
+cleaner?" surfaced `system-prompt` — plain text I/O, bash instead of
+Python, fires for subagents automatically, eliminates three problems
+in one move. The alternative-approaches pass is not about nitpicking
+the implementation; it's about finding the approach that makes the
+implementation trivial.

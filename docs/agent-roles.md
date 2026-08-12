@@ -37,6 +37,10 @@ Applies the design-doc principles to pull requests and staged changes.
   surface principles from findings
 - Output shape: a findings table — severity, finding, recommendation —
   one sentence per row. Then a bottom-line verdict. No rambling.
+- Strategy: after the first findings pass, try an "alternative approaches"
+  pass — is there a substantively different way to do this that would be
+  cleaner? Would a different hook, tool, or pattern eliminate an entire
+  class of problem? The best finding isn't a bug — it's a simpler design.
 
 ### QA / consistency checker
 Verifies that conventions hold across the repo. Finds drift.
