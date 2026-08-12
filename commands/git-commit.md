@@ -1,50 +1,43 @@
 ---
-description: Review everything changed, stage what belongs, confirm a message, commit, and push
+description: Review everything changed, stage what belongs, confirm a message, commit
 argument-hint: [commit message]
 ---
 
-Wrap up the current unit of work. By now, coherent completed changes should already be
-staged from working liberally as you went (see `docs/git-workflow.md`'s "stage as you
-go" rule) — but this command still looks at the full picture, not just what's already
-staged, and can stage more of it right here if that's the right call.
+Wrap up this unit of work — see `git status` + `git diff`, stage what belongs,
+confirm a message, commit via `just commit`. The diff itself is one
+`git diff` away; the summary below is for orientation, not to restate it.
 
-1. Run `git status` and `git diff` (both unstaged and `--staged`) to see everything —
-   staged, unstaged, and untracked.
-2. If nothing has changed at all, say so clearly and stop.
-3. Summarize what changed, organized by file — a brief (1-2 sentence) description of
-   what changed in each, and whether it's currently staged, unstaged, or untracked.
-   Not a line-by-line diff dump.
-4. Decide what belongs in this commit:
-   - If everything relevant is already staged, proceed as-is.
-   - If there's unstaged or untracked work that's clearly part of the same logical
-     change, stage it now with `git add`.
-   - If there's a mix that doesn't belong together (e.g. an unrelated fix that crept
-     in along the way), call it out explicitly and suggest splitting it into a
-     separate commit, rather than silently bundling it in or silently leaving it out.
-5. Determine the commit message:
-   - If `$ARGUMENTS` is non-empty, use it verbatim as the commit message.
-   - If `$ARGUMENTS` is empty, draft one yourself from the staged diff, in this shape:
-     - A single-line subject, under 80 characters.
-     - A blank line.
-     - A bulleted body giving a high-level summary of what the change accomplishes and
-       why — not a restating of the diff line-by-line, and not an enumeration of every
-       file touched.
-     Show the drafted message and wait for confirmation (or a requested edit) before
-     using it — never commit with a self-drafted message that hasn't been confirmed.
-6. Once confirmed, write the message to a temp file, with a trailing:
+```
+git status
+# keep an eye on staged, unstaged, untracked
 
-    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+git diff                    # unstaged
+git diff --staged           # staged
+```
 
-   Then run `just save <message-file>` to commit. Never use `--no-verify`,
-   `--no-gpg-sign`, `-c commit.gpgsign=false`, or force-amend an existing commit
-   unless explicitly asked — if a pre-commit hook fails, fix the issue, re-stage
-   (`git add -p`), and create a new commit instead (a fresh `just save` call).
-7. Now follow `/git-push`'s own sync procedure, unchanged, against the commit that
-   just landed: fetch the upstream remote, check for divergence, integrate cleanly
-   with `git pull` if behind (stop and hand back on conflicts, don't push), then list
-   the commits not yet on the upstream — including the one from step 6 — and show
-   them. Wait for confirmation before pushing; the message confirmation in step 5 is
-   not itself authorization to push silently, that's a separate nod.
-8. Once confirmed, run `just ship` to push.
+Then work through these — each step is a single sentence, no more:
 
-After it runs, confirm the working tree is clean (or show what's left).
+1. Nothing changed → say so and stop.
+2. In one short paragraph, name the **kinds** of files changed and **why**
+   (e.g. "docs + justfile: rename claude→agent, 'save'→'commit'"), with a
+   scan-track (staged / unstaged / untracked). Don't enumerate files one by
+   one — `git status` already does that.
+3. Stage anything relevant that isn't already (no blind `git add -A`). If
+   something doesn't belong in this commit, call it out and suggest a
+   separate commit rather than bundling silently.
+4. Commit message:
+   - `$ARGUMENTS` non-empty → use it verbatim.
+   - else → draft a one-line subject (<80 chars), blank line, then a bulleted
+     body. Count is free, but each bullet must describe one clearly scoped
+     change — its kind and why, not file-by-file. *Show it and wait for
+     confirmation* — never commit a self-drafted message that wasn't confirmed.
+   - Trailer: `Co-Authored-By: <model name>` — the active model's name.
+   Confirmed → write the message to a temp file, then:
+   `just commit <message-file>`. Never `--no-verify`, `--no-gpg-sign`,
+   `-c commit.gpgsign=false`, or force-amend — if a pre-commit hook fails,
+   fix the issue, `git add -p`, and re-run `just commit`.
+5. Verify the commit exists: `git log -1 --oneline` — confirm the hash is
+   real and the subject matches. Then report working tree state.
+
+Push is separate. Use `/git-push` when ready to publish — typically after
+several commits, when the branch's work is complete.
