@@ -34,6 +34,8 @@ Applies the design-doc principles to pull requests and staged changes.
 - Has: `/git-commit`, `/git-push`
 - Responsibility: catch coupling, duplication, dead code, bad names;
   surface principles from findings
+- Output shape: a findings table — severity, finding, recommendation —
+  one sentence per row. Then a bottom-line verdict. No rambling.
 
 ### QA / consistency checker
 Verifies that conventions hold across the repo. Finds drift.

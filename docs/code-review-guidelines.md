@@ -104,3 +104,22 @@ default path is the one that already works. Don't add a new pattern
 where an existing one covers the case, and don't silently deviate from
 the documented one. (Example: the commit trailer is always
 `Co-Authored-By: <model name>`, never a hardcoded or invented value.)
+
+## Keep scope tight — "while I'm in here" is the enemy
+
+Before building something adjacent to the ask, stop and ask: was this
+requested? An agent's task scope is set by the user, not stretched by
+proximity. "While I'm in here" additions (extra hooks, helper scripts,
+quality-of-life features that "felt related") are the #1 source of
+revertible code. The fix is usually deletion — the simpler the
+solution, the smaller the diff to review.
+
+## Complexity budget: delete before debating tools
+
+When code looks over-engineered (N copies of nearly-identical logic,
+a chain of scripts that could be one), the first question isn't "can I
+rewrite this in bash" — it's "does the thing need to exist at all?"
+Often the right fix is deletion, not refactoring. A single Python
+script that does one job clearly beats three Python scripts with
+duplicated boilerplate, regardless of whether any of them could have
+been sed or jq.
