@@ -23,6 +23,23 @@ Worktrees live under `$HOME/worktrees/`, not inside a session scratchpad
 — scratchpads are ephemeral and can be cleaned up; parked work should survive
 that. Branch names use the `agent/` prefix already established in this repo.
 
+## If work was accidentally done in the primary checkout
+
+Do NOT commit it there. Move the changes to a proper branch first:
+
+1. Create a worktree from the current state: `cohort-new-worktree <topic>`.
+2. Copy the modified files from the primary checkout into the new worktree.
+3. In the worktree: verify the diff matches — `git diff` should be identical
+   to what was in the primary checkout. If not, reconcile until it is.
+4. Commit and push from the worktree as usual.
+5. Only AFTER the worktree commit is pushed and verified: discard the stale
+   changes in the primary checkout
+   (`git restore <files>` + `git restore --staged <files>`, or
+   `git checkout .` for a full reset).
+
+The cleanup script's fast-forward will also fail if the primary checkout has
+uncommitted changes — this is the fix for that.
+
 ## Keep branches small in scope
 
 A branch should cover one concern. If the scope drifts mid-session — a
