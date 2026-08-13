@@ -40,6 +40,14 @@ Keep parameters when the caller genuinely chooses the value, it varies per
 invocation, or explicit injection improves isolation and testing. Don't
 replace explicit dependencies with unrelated global state.
 
+## Verify after mutation
+
+Every tool that changes state should have its effect confirmed in the same
+pass. `patch` → `git diff`. `gh pr create` → `gh pr view`. A script that
+removes a worktree → check `git worktree list`. Exit codes lie — don't
+trust them. Even "expected" warnings (like `gh pr create` reporting
+"1 uncommitted change") deserve a second look before proceeding.
+
 ## Make failures loud
 
 Three recurring ways code hides its own failure:
@@ -84,6 +92,13 @@ redirect are different concerns and should be tested differently:
 - Genuine branches (skip this step under condition Y) are real logic and
   should stay explicit — don't try to fold them into the default-path
   helper just because they also change what's "next."
+
+## Dead identical branches are a signal
+
+When every arm of an `if`/`else` does the same thing, at least one branch
+is dead. Don't just simplify the code — check whether the condition itself
+was ever meaningful. If both branches were `git checkout -- "$f"`, the
+file-exists check was the dead weight. The fix is deletion, not cleanup.
 
 ## Flag dead/unreachable code instead of routing around it quietly
 
@@ -140,6 +155,11 @@ proximity. "While I'm in here" additions (extra hooks, helper scripts,
 quality-of-life features that "felt related") are the #1 source of
 revertible code. The fix is usually deletion — the simpler the
 solution, the smaller the diff to review.
+
+The reviewer's job: flag every change that wasn't in the ask. "Related" is
+not "requested." Even small, obviously-correct improvements on adjacent
+files are revert risks — surface them so the author can decide whether they
+stay or land separately.
 
 ## Complexity budget: delete before debating tools
 

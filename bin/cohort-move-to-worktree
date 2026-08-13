@@ -19,7 +19,6 @@ if git rev-parse --git-dir | grep -q worktrees; then
     exit 1
 fi
 WORKTREE_ROOT=$(git rev-parse --show-toplevel)
-MAIN_ROOT="$WORKTREE_ROOT"
 
 # Collect everything dirty.
 STAGED=$(git diff --staged --name-only)
@@ -128,15 +127,10 @@ echo "=== Cleaning primary checkout ==="
 # Discard staged changes.
 git reset --quiet HEAD
 
-# Discard unstaged modifications and untracked files.
+# Discard unstaged modifications.
 if [[ -n "$UNSTAGED" ]]; then
     echo "$UNSTAGED" | while IFS= read -r f; do
-        if [[ -f "$WORKTREE_ROOT/$f" ]]; then
-            git checkout -- "$f"
-        else
-            # File was deleted — restore it.
-            git checkout -- "$f"
-        fi
+        git checkout -- "$f"
     done
 fi
 
