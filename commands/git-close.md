@@ -64,3 +64,16 @@ remote branch — a human does both.
 **The worktree you are standing in is deleted by this script.** As soon as it
 succeeds, change your working directory to the primary checkout (the script
 prints the path) — every later command will fail otherwise.
+
+### 5. Verify the cleanup
+
+From the primary checkout, confirm all three effects actually happened:
+
+```
+git worktree list          # the closed worktree is gone
+git branch                 # the closed branch is gone
+git log -1 --oneline       # default branch is at the merged tip
+```
+
+Report what's left. If any of the three didn't happen, say so — a partial
+cleanup is not a successful one.

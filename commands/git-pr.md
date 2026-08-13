@@ -71,3 +71,17 @@ Confirmed →
   ```
 
 Report the PR URL and number.
+
+### 6. Verify it landed
+
+Don't trust the exit status — read the PR back and confirm the title and body
+are the ones you just sent:
+
+```
+cohort-gh pr view <number> --json title,body
+```
+
+If they don't match, say so plainly rather than reporting success. (`gh pr
+edit` has been seen to exit 0 while changing nothing when its GraphQL query
+hits a deprecated field; `cohort-gh api -X PATCH repos/<owner>/<repo>/pulls/<number>`
+is the fallback.)
