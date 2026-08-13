@@ -24,11 +24,16 @@ echo "Bootstrapping Cohort for $PROJECT_NAME..."
 echo "  Engine: $ENGINE_ROOT"
 echo "  Project: $PROJECT_ROOT"
 
-# 1. Scaffold .cohort/ with a template prompt.md
-mkdir -p "$PROJECT_ROOT/.cohort/docs"
-touch "$PROJECT_ROOT/.cohort/docs/.gitkeep"
-if [[ ! -f "$PROJECT_ROOT/.cohort/prompt.md" ]]; then
-    cat > "$PROJECT_ROOT/.cohort/prompt.md" << PROMPTEOF
+# 1. Skip scaffolding when in the engine repo itself
+ENGINE_REAL=$(readlink -f "$ENGINE_ROOT")
+PROJECT_REAL=$(readlink -f "$PROJECT_ROOT")
+if [[ "$ENGINE_REAL" == "$PROJECT_REAL" ]]; then
+    echo "Skipping .cohort/ scaffold — this is the engine repo."
+else
+    mkdir -p "$PROJECT_ROOT/.cohort/docs"
+    touch "$PROJECT_ROOT/.cohort/docs/.gitkeep"
+    if [[ ! -f "$PROJECT_ROOT/.cohort/prompt.md" ]]; then
+        cat > "$PROJECT_ROOT/.cohort/prompt.md" << PROMPTEOF
 # Project context
 
 TODO: describe this project — what it does, its tech stack, key conventions,
@@ -37,9 +42,10 @@ top of Cohort's universal docs; keep it project-specific.
 
 The project is called ${PROJECT_NAME}.
 PROMPTEOF
-    echo "Created .cohort/prompt.md"
-else
-    echo ".cohort/prompt.md already exists, skipping"
+        echo "Created .cohort/prompt.md"
+    else
+        echo ".cohort/prompt.md already exists, skipping"
+    fi
 fi
 
 # 2. Install the shelley hook
@@ -62,4 +68,6 @@ fi
 
 echo ""
 echo "Done. Open Shelley in $PROJECT_ROOT to use Cohort."
-echo "Next: edit .cohort/prompt.md to describe this project."
+if [[ "$ENGINE_REAL" != "$PROJECT_REAL" ]]; then
+    echo "Next: edit .cohort/prompt.md to describe this project."
+fi
