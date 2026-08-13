@@ -33,7 +33,11 @@ If unresolved comments exist:
 
 ### 3. Merge
 
-- `gh pr merge <pr> --squash --delete-branch` (preferred) or `--merge`.
+- `gh pr merge <pr> --merge --delete-branch`. This preserves each commit
+  (including its full message and `Co-Authored-By:` trailer) rather than
+  squashing into one; the PR history stays attributable to the models that
+  authored it. Merge commits that pulled in `main` are harmless — GitHub
+  records them in the merged history.
 - If the merge fails (conflicts, checks failing, etc.), report the error and
   stop — do not force.
 - Report the merge commit SHA.
@@ -41,7 +45,7 @@ If unresolved comments exist:
 ### 4. Clean up
 
 **Ask for confirmation** before the cleanup step. Report what will happen:
-- Remote branch deleted (already done by `--delete-branch` if using squash)
+- Remote branch deleted (already done by `--delete-branch`)
 - Worktree path that will be removed
 - Local branch that will be deleted
 - main will be checked out and fast-forwarded

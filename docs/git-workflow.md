@@ -105,7 +105,8 @@ It:
 1. Identifies the PR (from arguments or the current branch).
 2. Scans for unresolved actionable comments — if found, lists them and asks
    whether a re-review is needed before merging.
-3. Merges (squash by default, via `gh pr merge`).
+3. Merges by `gh pr merge --merge --delete-branch` — keeps every commit and
+   its attribution rather than squashing.
 4. After confirmation, runs `cohort-close` (from the branch's worktree, no
    arguments) to remove the worktree and delete the local branch, then
    fast-forwards the default branch in the main checkout to the latest
