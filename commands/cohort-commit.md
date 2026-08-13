@@ -41,5 +41,5 @@ Then work through these — each step is a single sentence, no more:
 5. Verify the commit exists: `git log -1 --oneline` — confirm the hash is
    real and the subject matches. Then report working tree state.
 
-Push is separate. Use `/git-push` when ready to publish — typically after
+Push is separate. Use `/cohort-push` when ready to publish — typically after
 several commits, when the branch's work is complete.

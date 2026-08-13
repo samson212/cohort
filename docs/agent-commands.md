@@ -7,7 +7,7 @@ never drifts from the source.
 
 | Command | File | What it does |
 |----------|------|--------------|
-| `/git-commit` | `commands/git-commit.md` | Review, stage, confirm, commit |
-| `/git-push` | `commands/git-push.md` | Sync, show commits, push after confirmation |
-| `/git-pr` | `commands/git-pr.md` | Create PR or update description for the current branch |
-| `/git-close` | `commands/git-close.md` | Check unresolved comments, hand off merge, clean up worktree/branch, update main |
+| `/cohort-commit` | `commands/cohort-commit.md` | Review, stage, confirm, commit |
+| `/cohort-push` | `commands/cohort-push.md` | Sync, show commits, push after confirmation |
+| `/cohort-pr` | `commands/cohort-pr.md` | Create PR or update description for the current branch |
+| `/cohort-close` | `commands/cohort-close.md` | Check unresolved comments, hand off merge, clean up worktree/branch, update main |

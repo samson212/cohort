@@ -4,18 +4,18 @@ argument-hint: [--draft]
 ---
 
 Create a pull request for the current branch, or update the description of an
-existing one. The branch must already be pushed (use `/git-push` first).
+existing one. The branch must already be pushed (use `/cohort-push` first).
 
 ### 1. Check local state
 
 - `git status` → if there are staged, unstaged, or untracked changes, stop.
-  Tell the user to run `/git-commit` and `/git-push` first.
+  Tell the user to run `/cohort-commit` and `/cohort-push` first.
 - Check for unpushed commits. The branch may have no upstream yet, so guard
   for that: `git rev-parse --abbrev-ref --symbolic-full-name @{u}`.
   - No upstream → the branch was never pushed. Stop, tell the user to run
-    `/git-push` first.
+    `/cohort-push` first.
   - Upstream exists → `git log --oneline @{u}..HEAD`. If any commits are
-    listed, stop and tell the user to `/git-push` first.
+    listed, stop and tell the user to `/cohort-push` first.
 
 All local work must be committed and pushed before running this command.
 
@@ -41,7 +41,7 @@ All local work must be committed and pushed before running this command.
 ### 4. Draft title + description
 
 - **Title** (<80 chars): a one-liner summarizing the branch's work — prefix
-  with the area if it helps (e.g. "commands: add /git-pr workflow").
+  with the area if it helps (e.g. "commands: add /cohort-pr workflow").
 - **Body**: a one-paragraph summary of what the branch does, listing key
   changes. Not a commit log — describe the effect, not each commit. Use
   bullet points for distinct changes when they're independent.
