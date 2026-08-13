@@ -1,0 +1,62 @@
+---
+description: Close a PR — check for unresolved comments, merge, clean up, and update main
+argument-hint: [PR number or URL]
+---
+
+Close a pull request. Work through these steps in order:
+
+### 1. Identify the PR
+
+- `$ARGUMENTS` non-empty:
+  - If it's a `#NN` number, resolve it in the current repo.
+  - If it's a full URL (github.com / github.int.exe.xyz), parse owner/repo/number.
+- `$ARGUMENTS` empty → find the PR for the current branch:
+  - `git branch --show-current` → look up its PR:
+    - `gh pr list --head $(git branch --show-current) --json number,title,state`
+  - If no PR exists for this branch, say so and stop.
+
+Get PR details: title, body, state, mergeability, review decision, and all
+comments (review + issue comments).
+
+### 2. Check for unresolved comments
+
+Scan all comments for actionable, unresolved feedback. This means:
+- Review comments that are part of a review thread and haven't been marked
+  resolved or addressed.
+- Constructive suggestions or requested changes that haven't been acted on.
+
+If unresolved comments exist:
+- List them succinctly (file, snippet, what was asked).
+- **Ask the user**: does this need a re-review, or is the PR ready to merge?
+- If they want a re-review, stop here so it can happen.
+- If they say it's ready, continue.
+
+### 3. Merge
+
+- `gh pr merge <pr> --merge --delete-branch`. This preserves each commit
+  (including its full message and `Co-Authored-By:` trailer) rather than
+  squashing into one; the PR history stays attributable to the models that
+  authored it. Merge commits that pulled in `main` are harmless — GitHub
+  records them in the merged history.
+- If the merge fails (conflicts, checks failing, etc.), report the error and
+  stop — do not force.
+- Report the merge commit SHA.
+
+### 4. Clean up
+
+**Ask for confirmation** before the cleanup step. Report what will happen:
+- Remote branch deleted (already done by `--delete-branch`)
+- Worktree path that will be removed
+- Local branch that will be deleted
+- main will be checked out and fast-forwarded
+
+If the merge succeeds, confirm the new HEAD on main, then run the script from
+the branch's worktree (no arguments — it derives everything from context):
+
+```
+cohort-close
+```
+
+This removes the current worktree, force-deletes the local branch, checks out
+main, and fast-forwards to origin/main. The remote branch should already be
+gone (deleted by `gh pr merge --delete-branch`).

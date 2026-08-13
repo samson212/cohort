@@ -87,9 +87,31 @@ it. Resuming later means reusing that worktree, not starting over.
 `/git-commit` commits locally only. Use `/git-push` when the branch's work
 is complete — typically after several commits — to sync and publish.
 `/git-push` is standalone: it syncs with the remote, shows what's about to
-go up, and pushes only after confirmation.
+go up, and pushes only after confirmation. Once pushed, use `/git-pr` to
+open a pull request — it drafts a title and description from the commit set
+and creates the PR after confirmation. If a PR already exists for the branch,
+`/git-pr` updates its description to reflect any new commits.
 
 This doesn't mean over-verifying a simple, unambiguous, explicitly-requested
 git command (e.g. a plain "push this") with unrequested pre-flight recon —
 reserve that instinct for genuinely ambiguous or destructive operations;
 `/git-push`'s own confirmation step already covers the ordinary case.
+
+## Closing a PR
+
+When a branch's work is complete and its PR is approved, use `/git-close`.
+It:
+
+1. Identifies the PR (from arguments or the current branch).
+2. Scans for unresolved actionable comments — if found, lists them and asks
+   whether a re-review is needed before merging.
+3. Merges by `gh pr merge --merge --delete-branch` — keeps every commit and
+   its attribution rather than squashing.
+4. After confirmation, runs `cohort-close` (from the branch's worktree, no
+   arguments) to remove the worktree and delete the local branch, then
+   fast-forwards the default branch in the main checkout to the latest
+   `origin/<default>`.
+
+`/git-close` does not push. The branch should already be pushed and the PR
+open before this command runs. If the merge fails (conflicts, failing
+checks), stop — do not force.

@@ -9,3 +9,5 @@ never drifts from the source.
 |----------|------|--------------|
 | `/git-commit` | `commands/git-commit.md` | Review, stage, confirm, commit |
 | `/git-push` | `commands/git-push.md` | Sync, show commits, push after confirmation |
+| `/git-pr` | `commands/git-pr.md` | Create PR or update description for the current branch |
+| `/git-close` | `commands/git-close.md` | Check unresolved comments, merge PR, clean up worktree/branch, update main |
