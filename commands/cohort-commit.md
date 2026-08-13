@@ -9,11 +9,13 @@ below is for orientation, not to restate it.
 **Before anything else:** verify you're in a worktree, not the primary
 checkout:
 
-    [[ "$(git rev-parse --show-toplevel)" == "$(dirname "$(git rev-parse --git-common-dir)")" ]] && \
-      echo "ERROR: this is the primary checkout. Create a worktree first: cohort-new-worktree <topic>" && exit 1
+    git rev-parse --git-dir | grep -q worktrees && echo WORKTREE || echo PRIMARY
 
-If this fires, stop and direct the user to create a worktree — do not
-proceed to the diff.
+- **WORKTREE**: continue to the diff below.
+- **PRIMARY**: do NOT proceed. Ask the user for a short topic name, then run
+  `cohort-move-to-worktree <topic>`. It copies all dirty files into a new
+  worktree on `agent/<topic>`, verifies diffs match, and cleans the primary
+  checkout. Then `cd ~/worktrees/<topic>` and re-invoke `/cohort-commit`.
 
 ```
 git status

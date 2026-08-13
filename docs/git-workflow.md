@@ -5,8 +5,15 @@ review.
 
 ## One worktree per task
 
-Never do substantive work directly in the primary checkout. Create a
-dedicated `git worktree` for each task, on its own branch, via:
+You may explore and edit in the primary checkout, but never commit there.
+When ready to commit, move the work to a dedicated worktree:
+
+```
+cohort-move-to-worktree <short-topic>
+```
+
+This creates `agent/<short-topic>` at `$HOME/worktrees/<short-topic>`
+and copies all dirty files over. For a clean-slate task (no edits yet), use:
 
 ```
 cohort-new-worktree <short-topic>
@@ -23,22 +30,23 @@ Worktrees live under `$HOME/worktrees/`, not inside a session scratchpad
 — scratchpads are ephemeral and can be cleaned up; parked work should survive
 that. Branch names use the `agent/` prefix already established in this repo.
 
-## If work was accidentally done in the primary checkout
+## Start in the primary checkout, move before committing
 
-Do NOT commit it there. Move the changes to a proper branch first:
+It’s fine to explore and edit in the primary checkout. When you’re
+ready to commit, move the work to a dedicated worktree:
 
-1. Create a worktree from the current state: `cohort-new-worktree <topic>`.
-2. Copy the modified files from the primary checkout into the new worktree.
-3. In the worktree: verify the diff matches — `git diff` should be identical
-   to what was in the primary checkout. If not, reconcile until it is.
-4. Commit and push from the worktree as usual.
-5. Only AFTER the worktree commit is pushed and verified: discard the stale
-   changes in the primary checkout
-   (`git restore <files>` + `git restore --staged <files>`, or
-   `git checkout .` for a full reset).
+    cohort-move-to-worktree <topic>
 
-The cleanup script's fast-forward will also fail if the primary checkout has
-uncommitted changes — this is the fix for that.
+This is the worktree equivalent of `git checkout -b <topic>`. It:
+
+1. Creates a worktree on a new `agent/<topic>` branch from HEAD.
+2. Copies all dirty files (staged, unstaged, untracked) into the worktree.
+3. Verifies the diffs match identically.
+4. Cleans the primary checkout back to a pristine state.
+
+After moving, your working directory is still the primary checkout —
+`cd ~/worktrees/<topic>` to resume work there, then use
+`/cohort-commit` as usual.
 
 ## Keep branches small in scope
 
