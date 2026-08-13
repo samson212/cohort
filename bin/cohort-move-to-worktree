@@ -28,7 +28,7 @@ DELETED=$(git diff --staged --diff-filter=D --name-only; git diff --diff-filter=
 
 if [[ -z "$STAGED$UNSTAGED$UNTRACKED" ]]; then
     echo "Nothing dirty — just create a normal worktree: cohort-new-worktree $TOPIC"
-    exit 1
+    exit 0
 fi
 
 echo "Dirty files to move:"
