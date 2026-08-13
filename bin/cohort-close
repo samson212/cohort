@@ -70,24 +70,25 @@ else
     exit 1
 fi
 
-# 1. Remove the worktree. No --force: a dirty or locked worktree is left
-#    in place with a warning instead of silently discarding work.
-if git worktree remove "$WORKTREE"; then
-    echo "Removed worktree: $WORKTREE"
-else
-    echo "Warning: could not remove worktree $WORKTREE (dirty or locked) — left in place" >&2
+# 1. Remove the worktree. No --force: a dirty or locked worktree must not be
+#    silently discarded. Failure here is fatal — the steps below assume the
+#    worktree is gone, and continuing would report success on a cleanup that
+#    did not happen.
+if ! git worktree remove "$WORKTREE"; then
+    echo "Error: could not remove worktree $WORKTREE (dirty or locked)." >&2
+    echo "Nothing else was changed. Resolve it, then rerun cohort-close." >&2
+    exit 1
 fi
+echo "Removed worktree: $WORKTREE"
 
-# 2. Delete the now-merged local branch. Fails safely if it's already gone
-#    or still checked out somewhere.
-git branch -D "$BRANCH" 2>/dev/null || echo "(local branch $BRANCH already gone or still in use)"
+# 2. Delete the now-merged local branch. Fails safely if it's already gone.
+git branch -D "$BRANCH" 2>/dev/null || echo "(local branch $BRANCH already gone)"
 
 # 3. Fast-forward the default branch in the primary checkout.
 current=$(git branch --show-current)
 if [[ "$current" != "$DEFAULT_BRANCH" ]]; then
     git checkout "$DEFAULT_BRANCH"
 fi
-git fetch origin
 if git merge --ff-only "origin/$DEFAULT_BRANCH"; then
     echo "$DEFAULT_BRANCH is now at: $(git log -1 --oneline)"
 else
@@ -95,3 +96,9 @@ else
     echo "Inspect with: git log origin/$DEFAULT_BRANCH..HEAD" >&2
     exit 1
 fi
+
+# The directory this script was invoked from no longer exists. Callers must
+# relocate before running anything else.
+echo
+echo "NOTE: $WORKTREE no longer exists. Change your working directory to:"
+echo "  $MAIN_ROOT"

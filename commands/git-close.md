@@ -1,19 +1,18 @@
 ---
-description: Close a PR — check for unresolved comments, merge, clean up, and update main
-argument-hint: [PR number or URL]
+description: Check unresolved comments, hand off the merge, then clean up worktree and branch
 ---
 
-Close a pull request. Work through these steps in order:
+Close out a pull request. Work through these steps in order:
 
 ### 1. Identify the PR
 
-- `$ARGUMENTS` non-empty:
-  - If it's a `#NN` number, resolve it in the current repo.
-  - If it's a full URL (github.com / github.int.exe.xyz), parse owner/repo/number.
-- `$ARGUMENTS` empty → find the PR for the current branch:
-  - `git branch --show-current` → look up its PR:
-    - `gh pr list --head $(git branch --show-current) --json number,title,state`
-  - If no PR exists for this branch, say so and stop.
+Find the PR for the current branch:
+
+```
+gh pr list --head $(git branch --show-current) --json number,title,state,url
+```
+
+If no PR exists for this branch, say so and stop.
 
 Get PR details: title, body, state, mergeability, review decision, and all
 comments (review + issue comments).
@@ -31,30 +30,26 @@ If unresolved comments exist:
 - If they want a re-review, stop here so it can happen.
 - If they say it's ready, continue.
 
-### 3. Merge
+### 3. Hand the merge to the human
 
-**This step is deliberately left to a human.** The agent presents the PR and
-steps back; the human merges it on GitHub (e.g. with merge/rebase/squash as
-they choose) and, separately, deletes the remote branch there. Remote-branch
-cleanup is intentionally not scripted: it needs GitHub authentication, and
-leaving the branch in place after a merge is harmless — the merged tip stays
-reachable until a human removes it.
+**The agent does not merge.** Present the PR URL and stop; the human merges it
+on GitHub (merge/rebase/squash — their choice) and deletes the remote branch
+there. Remote-branch cleanup is intentionally not scripted: it needs GitHub
+authentication, and leaving the branch in place after a merge is harmless —
+the merged tip stays reachable until a human removes it.
 
-- If the merge fails (conflicts, checks failing, etc.), report the error and
-  stop — do not force.
-- Report the merge commit SHA.
+Wait for the user to confirm the PR is merged before continuing.
 
 ### 4. Clean up
 
-**Ask for confirmation** before the cleanup step. Report what will happen:
+**Ask for confirmation** before cleanup. Report what will happen:
 - Worktree path that will be removed
 - Local branch that will be deleted
 - The default branch will be checked out in the primary checkout and
   fast-forwarded to the newly-merged tip
 
-If the merge succeeds, confirm the new HEAD on the default branch, then run
-the script from the branch's worktree (no arguments — it derives everything
-from context):
+Confirmed → run the script from the branch's worktree (no arguments — it
+derives everything from context):
 
 ```
 cohort-close
@@ -63,5 +58,9 @@ cohort-close
 `cohort-close` verifies the branch tip is an ancestor of the remote default
 branch (i.e. the PR really was merged), and only then removes the current
 worktree, deletes the local branch, checks out the default branch, and fast-
-forwards to origin/<default>. It does NOT delete the remote branch — a human
-cleans that up in the GitHub UI.
+forwards to origin/<default>. It does NOT merge, and does NOT delete the
+remote branch — a human does both.
+
+**The worktree you are standing in is deleted by this script.** As soon as it
+succeeds, change your working directory to the primary checkout (the script
+prints the path) — every later command will fail otherwise.

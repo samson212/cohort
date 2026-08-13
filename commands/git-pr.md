@@ -10,8 +10,12 @@ existing one. The branch must already be pushed (use `/git-push` first).
 
 - `git status` → if there are staged, unstaged, or untracked changes, stop.
   Tell the user to run `/git-commit` and `/git-push` first.
-- `git log --oneline @{u}..HEAD` → unpushed commits. If any exist, stop and
-  tell the user to `/git-push` first.
+- Check for unpushed commits. The branch may have no upstream yet, so guard
+  for that: `git rev-parse --abbrev-ref --symbolic-full-name @{u}`.
+  - No upstream → the branch was never pushed. Stop, tell the user to run
+    `/git-push` first.
+  - Upstream exists → `git log --oneline @{u}..HEAD`. If any commits are
+    listed, stop and tell the user to `/git-push` first.
 
 All local work must be committed and pushed before running this command.
 

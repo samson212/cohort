@@ -113,8 +113,8 @@ It:
    arguments): it verifies the branch tip is an ancestor of the remote
    default branch, then removes the worktree, deletes the local branch, and
    fast-forwards the default branch in the primary checkout to the latest
-   `origin/<default>`.
+   `origin/<default>`. The worktree it ran from is gone afterwards — relocate
+   to the primary checkout before running anything else.
 
 `/git-close` does not push and does not merge. The branch should already be
-pushed and the PR open before this command runs. If the merge fails
-(conflicts, checks failing), stop — do not force.
+pushed and the PR open before this command runs.
