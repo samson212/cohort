@@ -1,21 +1,20 @@
 ---
-description: Create or update a pull request — draft title/description for the current branch's commits
-argument-hint: [--draft]
+description: Create or update a pull request — draft title/description for the current branch's commits. New PRs are always opened as drafts.
 ---
 
 Create a pull request for the current branch, or update the description of an
-existing one. The branch must already be pushed (use `/git-push` first).
+existing one. The branch must already be pushed (use `/cohort-push` first).
 
 ### 1. Check local state
 
 - `git status` → if there are staged, unstaged, or untracked changes, stop.
-  Tell the user to run `/git-commit` and `/git-push` first.
+  Tell the user to run `/cohort-commit` and `/cohort-push` first.
 - Check for unpushed commits. The branch may have no upstream yet, so guard
   for that: `git rev-parse --abbrev-ref --symbolic-full-name @{u}`.
   - No upstream → the branch was never pushed. Stop, tell the user to run
-    `/git-push` first.
+    `/cohort-push` first.
   - Upstream exists → `git log --oneline @{u}..HEAD`. If any commits are
-    listed, stop and tell the user to `/git-push` first.
+    listed, stop and tell the user to `/cohort-push` first.
 
 All local work must be committed and pushed before running this command.
 
@@ -41,7 +40,7 @@ All local work must be committed and pushed before running this command.
 ### 4. Draft title + description
 
 - **Title** (<80 chars): a one-liner summarizing the branch's work — prefix
-  with the area if it helps (e.g. "commands: add /git-pr workflow").
+  with the area if it helps (e.g. "commands: add /cohort-pr workflow").
 - **Body**: a one-paragraph summary of what the branch does, listing key
   changes. Not a commit log — describe the effect, not each commit. Use
   bullet points for distinct changes when they're independent.
@@ -49,8 +48,10 @@ All local work must be committed and pushed before running this command.
 Show the draft and **wait for confirmation** — never create or update a PR
 without it.
 
-`$ARGUMENTS` may contain `--draft` to open as a draft PR (new PR only;
-ignored for updates).
+**New PRs are always opened as drafts** — there is no prompt, and the `--draft`
+argument is not needed (and should not be passed; the creation command below
+hardcodes it). Drafting signals the branch isn't merge-ready; a human marks it
+ready when they want it reviewed.
 
 ### 5. Create or update
 
@@ -59,16 +60,19 @@ Confirmed →
 - **New PR**:
   ```
   cohort-gh pr create \
+    --draft \
     --title "<title>" \
     --body "<body>" \
     --base <default-branch> \
-    --head $(git branch --show-current) \
-    [$ARGUMENTS]
+    --head $(git branch --show-current)
   ```
 - **Existing PR**:
   ```
   cohort-gh pr edit <number> --title "<title>" --body "<body>"
   ```
+
+(Updating an existing PR never changes its draft state — if a PR is already a
+draft, it stays a draft; if it's open, it stays open.)
 
 Report the PR URL and number.
 

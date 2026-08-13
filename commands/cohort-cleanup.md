@@ -52,14 +52,14 @@ Confirmed → run the script from the branch's worktree (no arguments — it
 derives everything from context):
 
 ```
-cohort-close
+cohort-cleanup
 ```
 
-`cohort-close` verifies the branch tip is an ancestor of the remote default
-branch (i.e. the PR really was merged), and only then removes the current
-worktree, deletes the local branch, checks out the default branch, and fast-
-forwards to origin/<default>. It does NOT merge, and does NOT delete the
-remote branch — a human does both.
+`cohort-cleanup` verifies the branch tip is an ancestor of the
+remote default branch (i.e. the PR really was merged), and only then removes
+the current worktree, deletes the local branch, checks out the default
+branch, and fast-forwards to origin/<default>. It does NOT merge, and does
+NOT delete the remote branch — a human does both.
 
 **The worktree you are standing in is deleted by this script.** As soon as it
 succeeds, change your working directory to the primary checkout (the script

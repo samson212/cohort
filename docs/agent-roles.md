@@ -9,6 +9,7 @@ agents/
     git-workflow.md         -> ../../docs/git-workflow.md
     agent-roles.md          -> ../../docs/agent-roles.md
     agent-commands.md       -> ../../docs/agent-commands.md
+    engine-install.md       -> ../../docs/engine-install.md
   reviewer/                 # universal + delta
     prompt.md
     code-review-guidelines.md -> ../../docs/code-review-guidelines.md
@@ -34,28 +35,29 @@ provide.
   walks `agents/cohort/` on every turn: `prompt.md` first, then symlinked
   `*.md` in alphabetical order. Cohort loads the remaining agents' docs by
   having them `cat` their own `agents/<role>/` directory.
-- **`commands/`** — Skills. Loaded on invocation, not always present.
-  Each file is a self-contained prompt the agent follows when the
-  corresponding slash command is called.
+- **`commands/`** — Skills. Loaded on invocation via the `hooks/slash/`
+  hooks, not always present. Each file is a self-contained prompt the
+  agent follows when the corresponding slash command is called.
 - **`hooks/`** — Lifecycle. `system-prompt` auto-injects Cohort's context;
-  other hooks may follow.
+  `slash/` contains the `/cohort-*` command hooks that expand a bare slash
+  message into the full prompt text.
 - **`bin/`** — Executable scripts. Recipes that must run the same way every
-  time — committing, pushing, creating worktrees — live here so no agent
-  can improvise around them. With `~/.cohort/bin` on PATH, any project
-  can call `cohort-new-worktree` etc. directly.
+  time — creating worktrees, cleaning up after a merge, updating the engine —
+  live here so no agent can improvise around them. With `~/.cohort/bin` on
+  PATH, any project can call `cohort-new-worktree` etc. directly.
 
 ## Roles
 
 ### Cohort (default)
 The entrypoint agent. Coordinates subagents, delegates work, and makes
 decisions that require awareness of all conventions.
-- Has: `/git-commit`, `/git-push`, `/git-pr`, `/git-close`
+- Has: `/cohort-commit`, `/cohort-push`, `/cohort-pr`, `/cohort-cleanup`
 - Universal docs: `agents/cohort/` (auto-loaded by `hooks/system-prompt` on
   every turn, including subagents) — symlinked into this directory
 
 ### Code reviewer
 Reviews pull requests and staged changes against design-doc principles.
-- Has: `/git-commit`, `/git-push`
+- Has: `/cohort-commit`, `/cohort-push`
 - Delta docs: `agents/reviewer/prompt.md` + `code-review-guidelines.md`
 
 ### QA

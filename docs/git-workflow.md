@@ -57,22 +57,22 @@ don't undo the commit entirely, make a new commit on top.
    hoping to sort them out later — `git add` for this purpose is ordinary,
    expected behavior, not something that needs asking first.
 3. Repeat until the task's scope is done, or it's a good point to wrap up.
-4. **Wrap up with `/git-commit`** — it looks at everything (staged,
+4. **Wrap up with `/cohort-commit`** — it looks at everything (staged,
    unstaged, and untracked), can stage more of it right there if some of it
    belongs in this commit, drafts and confirms a message, commits — then
-   leaves the push for later, when `/git-push` is invoked.
+   leaves the push for later, when `/cohort-push` is invoked.
 
-### Hard rule: `/git-commit` is not optional
+### Hard rule: `/cohort-commit` is not optional
 
 Never run `git commit` directly — under any circumstances, including when
 the diff looks obviously correct, when a commit message was already drafted
 and agreed on earlier in conversation, or when the user's phrasing is
 general encouragement rather than a specific instruction (e.g. "let's fix
 it," "go ahead," "sounds good"). None of those are the confirmation
-`/git-commit` is built to collect. A commit being local and reversible does
+`/cohort-commit` is built to collect. A commit being local and reversible does
 not waive this — that's a general default this repo overrides on purpose.
 Freely staging with `git add` as you go (see above), or inspecting state
-with `git status`/`git diff`, is fine; committing outside `/git-commit` is
+with `git status`/`git diff`, is fine; committing outside `/cohort-commit` is
 not. If you catch yourself about to type `git commit`, stop and invoke the
 slash command instead.
 
@@ -84,37 +84,39 @@ it. Resuming later means reusing that worktree, not starting over.
 
 ## Pushing
 
-`/git-commit` commits locally only. Use `/git-push` when the branch's work
+`/cohort-commit` commits locally only. Use `/cohort-push` when the branch's work
 is complete — typically after several commits — to sync and publish.
-`/git-push` is standalone: it syncs with the remote, shows what's about to
-go up, and pushes only after confirmation. Once pushed, use `/git-pr` to
+`/cohort-push` is standalone: it syncs with the remote, shows what's about to
+go up, and pushes only after confirmation. Once pushed, use `/cohort-pr` to
 open a pull request — it drafts a title and description from the commit set
-and creates the PR after confirmation. If a PR already exists for the branch,
-`/git-pr` updates its description to reflect any new commits.
+and creates the PR **as a draft** after confirmation (drafts are mandatory;
+`--draft` is hardcoded in the command). If a PR already exists for the branch,
+`/cohort-pr` updates its description to reflect any new commits.
 
 This doesn't mean over-verifying a simple, unambiguous, explicitly-requested
 git command (e.g. a plain "push this") with unrequested pre-flight recon —
 reserve that instinct for genuinely ambiguous or destructive operations;
-`/git-push`'s own confirmation step already covers the ordinary case.
+`/cohort-push`'s own confirmation step already covers the ordinary case.
 
-## Closing a PR
+## Cleaning up after a PR has been closed
 
-When a branch's work is complete and its PR is approved, use `/git-close`.
+When a branch's work is complete and its PR is approved, use `/cohort-cleanup`.
 It:
 
-1. Identifies the PR (from arguments or the current branch).
+1. Identifies the PR for the current branch.
 2. Scans for unresolved actionable comments — if found, lists them and asks
    whether a re-review is needed before merging.
 3. Presents the PR and hands the merge to the human: they merge it on GitHub
    (merge/rebase/squash — their choice). The remote branch is also deleted by
    the human in the GitHub UI afterwards; this is deliberately not scripted
    (it needs GitHub authentication, and the branch is harmless after merge).
-4. After confirmation, runs `cohort-close` (from the branch's worktree, no
-   arguments): it verifies the branch tip is an ancestor of the remote
-   default branch, then removes the worktree, deletes the local branch, and
-   fast-forwards the default branch in the primary checkout to the latest
-   `origin/<default>`. The worktree it ran from is gone afterwards — relocate
-   to the primary checkout before running anything else.
+4. After confirmation, runs `cohort-cleanup` (from the branch's
+   worktree, no arguments): it verifies the branch tip is an ancestor of the
+   remote default branch, then removes the worktree, deletes the local
+   branch, and fast-forwards the default branch in the primary checkout to
+   the latest `origin/<default>`. The worktree it ran from is gone
+   afterwards — relocate to the primary checkout before running anything
+   else.
 
-`/git-close` does not push and does not merge. The branch should already be
+`/cohort-cleanup` does not push and does not merge. The branch should already be
 pushed and the PR open before this command runs.

@@ -1,9 +1,9 @@
 #!/bin/bash
-# cohort-close: clean up a merged branch's worktree and update the primary
-# checkout after a PR was merged.
+# cohort-cleanup: clean up a merged branch's worktree and update
+# the primary checkout after a PR was merged.
 #
 # Run from inside the branch's worktree — nothing else is needed:
-#   - the worktree being closed is the one the command runs from,
+#   - the worktree being cleaned up is the one the command runs from,
 #   - the branch to delete is the one checked out there,
 #   - the primary checkout and default branch are derived from git itself.
 #
@@ -16,16 +16,16 @@
 # This removes the worktree, deletes the local branch, checks out the default
 # branch in the primary checkout, and fast-forwards it to the merged state.
 #
-# Usage: cohort-close   (no arguments)
+# Usage: cohort-cleanup   (no arguments)
 set -e
 
-# The worktree to close is the one we're standing in.
+# The worktree to clean up is the one we're standing in.
 WORKTREE=$(git rev-parse --show-toplevel)
 
-# The branch checked out here is the one being closed.
+# The branch checked out here is the one being cleaned up.
 BRANCH=$(git branch --show-current)
 if [[ -z "$BRANCH" ]]; then
-    echo "Error: detached HEAD in $WORKTREE — nothing to close" >&2
+    echo "Error: detached HEAD in $WORKTREE — nothing to clean up" >&2
     exit 1
 fi
 
@@ -34,7 +34,7 @@ MAIN_ROOT=$(dirname "$(git rev-parse --git-common-dir)")
 
 if [[ "$WORKTREE" == "$MAIN_ROOT" ]]; then
     echo "Error: this is the primary checkout, not a worktree." >&2
-    echo "Run cohort-close from the branch's worktree instead." >&2
+    echo "Run cohort-cleanup from the branch's worktree instead." >&2
     exit 1
 fi
 
@@ -76,7 +76,7 @@ fi
 #    did not happen.
 if ! git worktree remove "$WORKTREE"; then
     echo "Error: could not remove worktree $WORKTREE (dirty or locked)." >&2
-    echo "Nothing else was changed. Resolve it, then rerun cohort-close." >&2
+    echo "Nothing else was changed. Resolve it, then rerun cohort-cleanup." >&2
     exit 1
 fi
 echo "Removed worktree: $WORKTREE"

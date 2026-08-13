@@ -1,0 +1,8 @@
+#!/bin/bash
+# slash/cohort-pr: replace /cohort-pr with the full command prompt.
+# The hook derives the engine root from its own symlink chain, so it works
+# whether symlinked from ~/.config/shelley/hooks/slash/ or run directly.
+set -e
+SELF=$(readlink -f "$0")
+ENGINE_ROOT=$(dirname "$(dirname "$(dirname "$SELF")")")
+cat "$ENGINE_ROOT/commands/cohort-pr.md"
