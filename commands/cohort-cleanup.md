@@ -15,8 +15,13 @@ cohort-gh pr list --head $(git branch --show-current) --state open --json number
 If nothing is found, try:
 
 ```
-cohort-gh pr list --head $(git branch --show-current) --state merged,closed --json number,title,state,url
+cohort-gh pr list --head $(git branch --show-current) --state merged --json number,title,state,url
 ```
+
+(`--state` only accepts a single value; `merged,closed` is not valid. Try
+`merged` first — it covers the common case. If the PR was closed without
+merging, it’ll be under `closed`, but in practice a branch that needs
+cleanup was merged.)
 
 If a PR is found (open or closed), get its details: title, body, state,
 mergeability, review decision, and all comments (review + issue comments).
