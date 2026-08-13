@@ -9,6 +9,7 @@ agents/
     git-workflow.md         -> ../../docs/git-workflow.md
     agent-roles.md          -> ../../docs/agent-roles.md
     agent-commands.md       -> ../../docs/agent-commands.md
+    engine-install.md       -> ../../docs/engine-install.md
   reviewer/                 # universal + delta
     prompt.md
     code-review-guidelines.md -> ../../docs/code-review-guidelines.md

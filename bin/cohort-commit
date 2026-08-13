@@ -1,6 +1,6 @@
 #!/bin/bash
 # cohort-commit: commit staged changes using a message file.
-# Called by /git-commit after review/staging/message-draft steps.
+# Called by /cohort-commit after review/staging/message-draft steps.
 # Usage: cohort-commit <message-file>
 set -e
 

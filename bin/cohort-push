@@ -1,6 +1,6 @@
 #!/bin/bash
 # cohort-push: push the current branch with upstream tracking.
-# Called by /git-push after sync/confirm steps.
+# Called by /cohort-push after sync/confirm steps.
 # Usage: cohort-push
 set -e
 
