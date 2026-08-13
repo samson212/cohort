@@ -10,8 +10,12 @@ existing one. The branch must already be pushed (use `/git-push` first).
 
 - `git status` → if there are staged, unstaged, or untracked changes, stop.
   Tell the user to run `/git-commit` and `/git-push` first.
-- `git log --oneline @{u}..HEAD` → unpushed commits. If any exist, stop and
-  tell the user to `/git-push` first.
+- Check for unpushed commits. The branch may have no upstream yet, so guard
+  for that: `git rev-parse --abbrev-ref --symbolic-full-name @{u}`.
+  - No upstream → the branch was never pushed. Stop, tell the user to run
+    `/git-push` first.
+  - Upstream exists → `git log --oneline @{u}..HEAD`. If any commits are
+    listed, stop and tell the user to `/git-push` first.
 
 All local work must be committed and pushed before running this command.
 
@@ -19,16 +23,16 @@ All local work must be committed and pushed before running this command.
 
 - `git branch --show-current` → confirm this is an `agent/*` branch.
 - Determine the default branch:
-  - `gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
+  - `cohort-gh repo view --json defaultBranchRef -q '.defaultBranchRef.name'`
 - Check for an existing PR:
-  - `gh pr list --head $(git branch --show-current) --json number,title,url,state`
+  - `cohort-gh pr list --head $(git branch --show-current) --json number,title,url,state`
 
 ### 3. Decide: create or update?
 
 - **No existing PR** → draft a title + description for a new PR (step 4).
 - **Existing PR** → check whether new commits have been pushed since the last
   description update:
-  - `gh pr view <number> --json commits,body -q '{commits: [.commits[].oid], body: .body}'`
+  - `cohort-gh pr view <number> --json commits,body -q '{commits: [.commits[].oid], body: .body}'`
   - `git log --oneline origin/<default>..HEAD` → the current commit set.
   - If the PR's commit list already matches HEAD and the description is current
     (the body reflects the commit set), say so and stop — nothing to do.
@@ -54,7 +58,7 @@ Confirmed →
 
 - **New PR**:
   ```
-  gh pr create \
+  cohort-gh pr create \
     --title "<title>" \
     --body "<body>" \
     --base <default-branch> \
@@ -63,7 +67,7 @@ Confirmed →
   ```
 - **Existing PR**:
   ```
-  gh pr edit <number> --title "<title>" --body "<body>"
+  cohort-gh pr edit <number> --title "<title>" --body "<body>"
   ```
 
 Report the PR URL and number.

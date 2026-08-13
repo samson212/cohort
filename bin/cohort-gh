@@ -1,0 +1,36 @@
+#!/bin/bash
+# cohort-gh: run gh against the host this repo's remote actually points at.
+#
+# gh does infer the host from git remotes, but only for hosts it considers
+# authenticated (an entry in hosts.yml, or GH_TOKEN). exe.dev injects the
+# GitHub credential at the network edge, so nothing on disk tells gh that
+# github.int.exe.xyz is usable: the remote gets filtered out, gh falls back
+# to github.com, finds no token, and prints "gh auth login".
+#
+# Setting GH_HOST is the documented fix (exe.dev/docs/integrations-github).
+# Deriving it from origin, rather than exporting it globally, keeps repos
+# whose remote really is github.com working too.
+#
+# Usage: cohort-gh <any gh arguments>
+set -e
+
+url=$(git remote get-url origin 2>/dev/null) || {
+    echo "cohort-gh: no 'origin' remote in $(pwd)" >&2
+    exit 1
+}
+
+# Strip the parts around the host, then require what's left to look like a
+# hostname. Anything else (a local path, a file:// URL, an empty remote) is
+# rejected rather than passed to gh as a bogus GH_HOST.
+#   https://host/owner/repo  git@host:owner/repo  ssh://git@host:22/owner/repo
+host=${url#*://}       # strip scheme, if any
+host=${host#*@}        # strip user@, if any
+host=${host%%[:/]*}    # keep up to the first : or /
+
+if [[ ! "$host" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+    echo "cohort-gh: origin does not look like a hosted git URL: $url" >&2
+    echo "cohort-gh: could not determine a GitHub host to target." >&2
+    exit 1
+fi
+
+GH_HOST="$host" exec gh "$@"
