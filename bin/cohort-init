@@ -48,7 +48,7 @@ PROMPTEOF
     fi
 fi
 
-# 2. Install the shelley hook
+# 2. Install the shelley hook(s)
 HOOK_SRC="$ENGINE_ROOT/hooks/system-prompt"
 HOOK_DST="$HOME/.config/shelley/hooks/system-prompt"
 mkdir -p "$(dirname "$HOOK_DST")"
@@ -65,6 +65,40 @@ else
     ln -sf "$HOOK_SRC" "$HOOK_DST"
     echo "Installed hook: $HOOK_DST -> $HOOK_SRC"
 fi
+
+# 3. Install the slash hooks (/cohort-* commands)
+SLASH_SRC_DIR="$ENGINE_ROOT/hooks/slash"
+SLASH_DST_DIR="$HOME/.config/shelley/hooks/slash"
+mkdir -p "$SLASH_DST_DIR"
+for hook_src in "$SLASH_SRC_DIR"/cohort-*; do
+    [[ -f "$hook_src" ]] || continue
+    hook_name=$(basename "$hook_src")
+    hook_dst="$SLASH_DST_DIR/$hook_name"
+    if [[ -L "$hook_dst" ]]; then
+        CURRENT_TARGET=$(readlink -f "$hook_dst")
+        WANTED_TARGET=$(readlink -f "$hook_src")
+        if [[ "$CURRENT_TARGET" == "$WANTED_TARGET" ]]; then
+            echo "Slash hook already installed: $hook_dst"
+        else
+            ln -sf "$hook_src" "$hook_dst"
+            echo "Slash hook relinked: $hook_dst -> $hook_src (was -> $CURRENT_TARGET)"
+        fi
+    else
+        ln -sf "$hook_src" "$hook_dst"
+        echo "Installed slash hook: $hook_dst -> $hook_src"
+    fi
+done
+
+# Remove any stale slash hooks for commands that no longer exist (e.g. the
+# old /cohort-close name) so a renamed command doesn't linger.
+for hook_dst in "$SLASH_DST_DIR"/cohort-*; do
+    [[ -L "$hook_dst" ]] || continue
+    hook_src="$SLASH_SRC_DIR/$(basename "$hook_dst")"
+    if [[ ! -e "$hook_src" ]]; then
+        rm "$hook_dst"
+        echo "Removed stale slash hook: $hook_dst"
+    fi
+done
 
 echo ""
 echo "Done. Open Shelley in $PROJECT_ROOT to use Cohort."

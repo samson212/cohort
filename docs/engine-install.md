@@ -12,8 +12,10 @@ projects via a thin `.cohort/` directory.
   bin/                      # scripts (add ~/.cohort/bin to PATH)
   agents/cohort/            # universal prompt.md + symlinked docs
   docs/                     # canonical docs
-  commands/                 # slash commands
-  hooks/                    # system-prompt hook
+  commands/                 # slash command prompts
+  hooks/
+    system-prompt           # auto-loads Cohort docs into every prompt
+    slash/                  # /cohort-* command hooks (expand commands/*.md)
   install.sh                # curl-pipeable installer
 
 ~/my-project/               # Shelley opens HERE
@@ -57,9 +59,12 @@ Then, from any project root:
 cohort-init
 ```
 
-This scaffolds `.cohort/` and installs the system-prompt hook. The hook
-loads universal docs from the engine, then layers on `.cohort/` deltas
-(project prompt at highest recency).
+This scaffolds `.cohort/` and installs the system-prompt hook **and** the
+`/cohort-*` slash hooks (`hooks/slash/`). `cohort-init` symlinks the
+slash hooks into `~/.config/shelley/hooks/slash/` alongside `system-prompt`,
+and removes any stale ones (e.g. a renamed command) automatically. The
+system-prompt hook loads universal docs from the engine, then layers on
+`.cohort/` deltas (project prompt at highest recency).
 
 ## Keeping the engine updated
 

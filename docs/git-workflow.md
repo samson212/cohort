@@ -89,7 +89,8 @@ is complete — typically after several commits — to sync and publish.
 `/cohort-push` is standalone: it syncs with the remote, shows what's about to
 go up, and pushes only after confirmation. Once pushed, use `/cohort-pr` to
 open a pull request — it drafts a title and description from the commit set
-and creates the PR after confirmation. If a PR already exists for the branch,
+and creates the PR **as a draft** after confirmation (drafts are mandatory;
+`--draft` is hardcoded in the command). If a PR already exists for the branch,
 `/cohort-pr` updates its description to reflect any new commits.
 
 This doesn't mean over-verifying a simple, unambiguous, explicitly-requested
@@ -99,7 +100,7 @@ reserve that instinct for genuinely ambiguous or destructive operations;
 
 ## Closing a PR
 
-When a branch's work is complete and its PR is approved, use `/cohort-close`.
+When a branch's work is complete and its PR is approved, use `/cohort-cleanup`.
 It:
 
 1. Identifies the PR for the current branch.
@@ -109,7 +110,7 @@ It:
    (merge/rebase/squash — their choice). The remote branch is also deleted by
    the human in the GitHub UI afterwards; this is deliberately not scripted
    (it needs GitHub authentication, and the branch is harmless after merge).
-4. After confirmation, runs `cohort-cleanup-worktree` (from the branch's
+4. After confirmation, runs `cohort-cleanup` (from the branch's
    worktree, no arguments): it verifies the branch tip is an ancestor of the
    remote default branch, then removes the worktree, deletes the local
    branch, and fast-forwards the default branch in the primary checkout to
@@ -117,5 +118,5 @@ It:
    afterwards — relocate to the primary checkout before running anything
    else.
 
-`/cohort-close` does not push and does not merge. The branch should already be
+`/cohort-cleanup` does not push and does not merge. The branch should already be
 pushed and the PR open before this command runs.

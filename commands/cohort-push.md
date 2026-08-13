@@ -20,9 +20,9 @@ Sync, show what's about to go up, push **only after confirmation**.
   upstream it targets (`<remote>/<branch>`). If nothing to push, say so, stop.
 - Present branch/target + commit list, **wait for confirmation**.
 
-Only after confirmation: `cohort-push` (which does
-`git push -u origin <branch>`). Never `--force` / `--force-with-lease` —
-that's a separate, usually-unnecessary decision. No confirmation → no push.
+Only after confirmation: `git push -u origin <branch>`. Never `--force` /
+`--force-with-lease` — that's a separate, usually-unnecessary decision. No
+confirmation → no push.
 
 After the push succeeds: check for an open PR on this branch (`cohort-gh pr list --head
 $(git branch --show-current) --json number,url`). Note which case applies:

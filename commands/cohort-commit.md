@@ -3,8 +3,8 @@ description: Review everything changed, stage what belongs, confirm a message, c
 ---
 
 Wrap up this unit of work — see `git status` + `git diff`, stage what belongs,
-confirm a message, commit via the `cohort-commit` script. The diff itself is one
-`git diff` away; the summary below is for orientation, not to restate it.
+confirm a message, commit. The diff itself is one `git diff` away; the summary
+below is for orientation, not to restate it.
 
 ```
 git status
@@ -34,8 +34,8 @@ Then work through these — each step is a single sentence, no more:
      confirmation* — never commit a self-drafted message that wasn't confirmed.
    - Trailer: append `Co-Authored-By: $(cohort-model-name)`. The model-name
      invocation must be run at commit time so it reflects the active model.
-   Confirmed → write the message to a temp file, then:
-   `cohort-commit <message-file>`. Never `--no-verify`,
+   Confirmed → write the message to a temp file, then run
+   `git commit -F <message-file>`. Never `--no-verify`,
    `--no-gpg-sign`, `-c commit.gpgsign=false`, or force-amend — if a
    pre-commit hook fails, fix the issue, `git add -p`, and re-run.
 5. Verify the commit exists: `git log -1 --oneline` — confirm the hash is

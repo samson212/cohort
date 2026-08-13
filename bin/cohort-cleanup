@@ -1,5 +1,5 @@
 #!/bin/bash
-# cohort-cleanup-worktree: clean up a merged branch's worktree and update
+# cohort-cleanup: clean up a merged branch's worktree and update
 # the primary checkout after a PR was merged.
 #
 # Run from inside the branch's worktree — nothing else is needed:
@@ -16,7 +16,7 @@
 # This removes the worktree, deletes the local branch, checks out the default
 # branch in the primary checkout, and fast-forwards it to the merged state.
 #
-# Usage: cohort-cleanup-worktree   (no arguments)
+# Usage: cohort-cleanup   (no arguments)
 set -e
 
 # The worktree to clean up is the one we're standing in.
@@ -34,7 +34,7 @@ MAIN_ROOT=$(dirname "$(git rev-parse --git-common-dir)")
 
 if [[ "$WORKTREE" == "$MAIN_ROOT" ]]; then
     echo "Error: this is the primary checkout, not a worktree." >&2
-    echo "Run cohort-cleanup-worktree from the branch's worktree instead." >&2
+    echo "Run cohort-cleanup from the branch's worktree instead." >&2
     exit 1
 fi
 
@@ -76,7 +76,7 @@ fi
 #    did not happen.
 if ! git worktree remove "$WORKTREE"; then
     echo "Error: could not remove worktree $WORKTREE (dirty or locked)." >&2
-    echo "Nothing else was changed. Resolve it, then rerun cohort-cleanup-worktree." >&2
+    echo "Nothing else was changed. Resolve it, then rerun cohort-cleanup." >&2
     exit 1
 fi
 echo "Removed worktree: $WORKTREE"

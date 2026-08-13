@@ -18,7 +18,8 @@ export PATH="$HOME/.cohort/bin:$PATH"
 ```
 
 Once that's done, from any project root, `cohort-init` scaffolds a `.cohort/`
-directory and installs the Shelley system-prompt hook.
+directory and installs the Shelley system-prompt hook plus the `/cohort-*`
+slash hooks.
 
 ```bash
 cd ~/my-project
@@ -44,10 +45,10 @@ cohort-update
 ```
 ~/.cohort -> ~/cohort       # symlink for tooling
 ~/.cohort/
-  bin/                      # scripts (cohort-new-worktree, cohort-commit, …)
+  bin/                      # scripts (cohort-new-worktree, …)
   agents/                   # persona + docs per role
   commands/                 # slash command prompts
-  hooks/                    # system-prompt hook
+  hooks/                    # system-prompt + slash hooks
   docs/                     # conventions (git-workflow, code-review, …)
 ```
 
