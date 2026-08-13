@@ -40,6 +40,21 @@ Keep parameters when the caller genuinely chooses the value, it varies per
 invocation, or explicit injection improves isolation and testing. Don't
 replace explicit dependencies with unrelated global state.
 
+## Make failures loud
+
+Three recurring ways code hides its own failure:
+
+- **Suppressed errors.** `2>/dev/null || echo "already gone"` reports one
+  cause for every failure. Let the real error through; branch on the exit
+  status if you need to.
+- **Unvalidated parsing.** String manipulation that can't fail (bash
+  parameter expansion, a regex with a fallback) always produces *something*.
+  Check the result is well-formed before using it — an empty-string check is
+  not enough.
+- **Effects assumed, not verified.** A command that exits 0 without doing its
+  job is worse than one that errors. When a step has an observable effect,
+  confirm the effect, not the exit code.
+
 ## Hunt for coupling disguised as a data-flow accident
 
 Before removing a "redundant-looking" value passed between two pieces of
