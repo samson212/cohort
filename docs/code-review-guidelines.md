@@ -28,6 +28,18 @@ mechanism belongs behind a property or method on the owning object, not
 repeated at each call site. Terse, boring call sites are a goal — `x.next`
 beats `x.steps[x.i + 1] if visible else ...` inlined everywhere it's needed.
 
+## Don't pass context the callee already owns
+
+Before adding a parameter, identify its source of truth. If the value is
+already authoritatively available from the receiver, a closure, or the
+callable's defined execution context, derive it there instead of asking
+callers to repeat it. Redundant inputs permit contradictory states and burden
+every call site.
+
+Keep parameters when the caller genuinely chooses the value, it varies per
+invocation, or explicit injection improves isolation and testing. Don't
+replace explicit dependencies with unrelated global state.
+
 ## Hunt for coupling disguised as a data-flow accident
 
 Before removing a "redundant-looking" value passed between two pieces of
