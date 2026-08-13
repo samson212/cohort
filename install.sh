@@ -56,8 +56,12 @@ fi
 if [[ ":$PATH:" != *":$HOME/.cohort/bin:"* && ":$PATH:" != *":~/.cohort/bin:"* ]]; then
     echo ""
     echo "⚠  ~/.cohort/bin is not on your PATH."
-    echo "   Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+    echo "   Add this to ~/.profile:"
     echo "       export PATH=\"\$HOME/.cohort/bin:\$PATH\""
+    echo ""
+    echo "   Use ~/.profile, not ~/.bashrc: agents invoke these scripts from"
+    echo "   non-interactive shells, and Ubuntu's ~/.bashrc returns early when"
+    echo "   not interactive — a PATH export there never runs for an agent."
     echo ""
 fi
 

@@ -9,7 +9,7 @@ Close out a pull request. Work through these steps in order:
 Find the PR for the current branch:
 
 ```
-gh pr list --head $(git branch --show-current) --json number,title,state,url
+cohort-gh pr list --head $(git branch --show-current) --json number,title,state,url
 ```
 
 If no PR exists for this branch, say so and stop.

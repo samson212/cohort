@@ -24,7 +24,7 @@ Only after confirmation: `cohort-push` (which does
 `git push -u origin <branch>`). Never `--force` / `--force-with-lease` —
 that's a separate, usually-unnecessary decision. No confirmation → no push.
 
-After the push succeeds: check for an open PR on this branch (`gh pr list --head
+After the push succeeds: check for an open PR on this branch (`cohort-gh pr list --head
 $(git branch --show-current) --json number,url`). Note which case applies:
 - **Existing PR**: note its URL — use `/git-pr` to update the description.
 - **No PR**: suggest `/git-pr` to create one.

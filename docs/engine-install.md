@@ -35,6 +35,18 @@ curl -sSL https://raw.githubusercontent.com/samson212/cohort/main/install.sh | b
 This clones the engine to `~/cohort`, creates `~/.cohort -> ~/cohort`,
 and checks that `~/.cohort/bin` is on your PATH.
 
+Put the PATH export in `~/.profile`, not `~/.bashrc`:
+
+```bash
+export PATH="$HOME/.cohort/bin:$PATH"
+```
+
+Agents run these scripts from non-interactive shells. Ubuntu's stock
+`~/.bashrc` returns early when the shell isn't interactive, so an export
+placed there works in your SSH session but never runs for an agent — the
+scripts come back as `command not found`. `~/.profile` is read by login
+shells either way.
+
 Then, from any project root:
 
 ```bash
