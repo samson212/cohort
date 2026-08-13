@@ -98,7 +98,7 @@ git command (e.g. a plain "push this") with unrequested pre-flight recon —
 reserve that instinct for genuinely ambiguous or destructive operations;
 `/cohort-push`'s own confirmation step already covers the ordinary case.
 
-## Closing a PR
+## Cleaning up after a PR has been closed
 
 When a branch's work is complete and its PR is approved, use `/cohort-cleanup`.
 It:
