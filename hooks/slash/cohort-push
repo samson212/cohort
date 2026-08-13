@@ -6,7 +6,3 @@ set -e
 SELF=$(readlink -f "$0")
 ENGINE_ROOT=$(dirname "$(dirname "$(dirname "$SELF")")")
 cat "$ENGINE_ROOT/commands/cohort-push.md"
-# Thread any slash-command arguments through to the prompt.
-if [[ -n "${SHELLEY_SLASH_ARGS:-}" ]]; then
-    printf '\n$ARGUMENTS: %s\n' "$SHELLEY_SLASH_ARGS"
-fi

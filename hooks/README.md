@@ -32,8 +32,7 @@ Pluggable slash commands. When a user sends a message starting with
 `hooks/slash/cohort-<name>` hook; its stdout replaces the user message.
 Each hook cats the corresponding prompt in `commands/cohort-<name>.md` —
 frontmatter and all — so `/cohort-commit` becomes the full procedure text
-for the LLM to follow. Any arguments the user types after the slash command
-are appended as `$ARGUMENTS` so the prompt sees them.
+for the LLM to follow.
 
 The prompt file in `commands/` is the single source of truth; the hooks
 are dumb readers. `cohort-init` installs these symlinks and removes stale
