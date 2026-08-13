@@ -6,6 +6,15 @@ Wrap up this unit of work — see `git status` + `git diff`, stage what belongs,
 confirm a message, commit. The diff itself is one `git diff` away; the summary
 below is for orientation, not to restate it.
 
+**Before anything else:** verify you're in a worktree, not the primary
+checkout:
+
+    [[ "$(git rev-parse --show-toplevel)" == "$(dirname "$(git rev-parse --git-common-dir)")" ]] && \
+      echo "ERROR: this is the primary checkout. Create a worktree first: cohort-new-worktree <topic>" && exit 1
+
+If this fires, stop and direct the user to create a worktree — do not
+proceed to the diff.
+
 ```
 git status
 # keep an eye on staged, unstaged, untracked
