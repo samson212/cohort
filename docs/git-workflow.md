@@ -105,13 +105,16 @@ It:
 1. Identifies the PR (from arguments or the current branch).
 2. Scans for unresolved actionable comments — if found, lists them and asks
    whether a re-review is needed before merging.
-3. Merges by `gh pr merge --merge --delete-branch` — keeps every commit and
-   its attribution rather than squashing.
+3. Presents the PR and hands the merge to the human: they merge it on GitHub
+   (merge/rebase/squash — their choice). The remote branch is also deleted by
+   the human in the GitHub UI afterwards; this is deliberately not scripted
+   (it needs GitHub authentication, and the branch is harmless after merge).
 4. After confirmation, runs `cohort-close` (from the branch's worktree, no
-   arguments) to remove the worktree and delete the local branch, then
-   fast-forwards the default branch in the main checkout to the latest
+   arguments): it verifies the branch tip is an ancestor of the remote
+   default branch, then removes the worktree, deletes the local branch, and
+   fast-forwards the default branch in the primary checkout to the latest
    `origin/<default>`.
 
-`/git-close` does not push. The branch should already be pushed and the PR
-open before this command runs. If the merge fails (conflicts, failing
-checks), stop — do not force.
+`/git-close` does not push and does not merge. The branch should already be
+pushed and the PR open before this command runs. If the merge fails
+(conflicts, checks failing), stop — do not force.

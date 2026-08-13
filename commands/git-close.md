@@ -33,11 +33,13 @@ If unresolved comments exist:
 
 ### 3. Merge
 
-- `gh pr merge <pr> --merge --delete-branch`. This preserves each commit
-  (including its full message and `Co-Authored-By:` trailer) rather than
-  squashing into one; the PR history stays attributable to the models that
-  authored it. Merge commits that pulled in `main` are harmless — GitHub
-  records them in the merged history.
+**This step is deliberately left to a human.** The agent presents the PR and
+steps back; the human merges it on GitHub (e.g. with merge/rebase/squash as
+they choose) and, separately, deletes the remote branch there. Remote-branch
+cleanup is intentionally not scripted: it needs GitHub authentication, and
+leaving the branch in place after a merge is harmless — the merged tip stays
+reachable until a human removes it.
+
 - If the merge fails (conflicts, checks failing, etc.), report the error and
   stop — do not force.
 - Report the merge commit SHA.
@@ -45,18 +47,21 @@ If unresolved comments exist:
 ### 4. Clean up
 
 **Ask for confirmation** before the cleanup step. Report what will happen:
-- Remote branch deleted (already done by `--delete-branch`)
 - Worktree path that will be removed
 - Local branch that will be deleted
-- main will be checked out and fast-forwarded
+- The default branch will be checked out in the primary checkout and
+  fast-forwarded to the newly-merged tip
 
-If the merge succeeds, confirm the new HEAD on main, then run the script from
-the branch's worktree (no arguments — it derives everything from context):
+If the merge succeeds, confirm the new HEAD on the default branch, then run
+the script from the branch's worktree (no arguments — it derives everything
+from context):
 
 ```
 cohort-close
 ```
 
-This removes the current worktree, force-deletes the local branch, checks out
-main, and fast-forwards to origin/main. The remote branch should already be
-gone (deleted by `gh pr merge --delete-branch`).
+`cohort-close` verifies the branch tip is an ancestor of the remote default
+branch (i.e. the PR really was merged), and only then removes the current
+worktree, deletes the local branch, checks out the default branch, and fast-
+forwards to origin/<default>. It does NOT delete the remote branch — a human
+cleans that up in the GitHub UI.
