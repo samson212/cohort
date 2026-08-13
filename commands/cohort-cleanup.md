@@ -6,16 +6,29 @@ Close out a pull request. Work through these steps in order:
 
 ### 1. Identify the PR
 
-Find the PR for the current branch:
+Find the PR for the current branch. Try open PRs first, then merged/closed:
 
 ```
-cohort-gh pr list --head $(git branch --show-current) --json number,title,state,url
+cohort-gh pr list --head $(git branch --show-current) --state open --json number,title,state,url
 ```
 
-If no PR exists for this branch, say so and stop.
+If nothing is found, try:
 
-Get PR details: title, body, state, mergeability, review decision, and all
-comments (review + issue comments).
+```
+cohort-gh pr list --head $(git branch --show-current) --state merged,closed --json number,title,state,url
+```
+
+If a PR is found (open or closed), get its details: title, body, state,
+mergeability, review decision, and all comments (review + issue comments).
+
+If **no PR is found at all**, say:
+"No PR found for this branch — it may have already been merged and the remote
+branch deleted. Has this PR been merged?"
+- If yes: skip to step 4 (Clean up). The script's own ancestor check will
+  confirm the merge before doing anything destructive.
+- If no: stop — a PR should exist before cleanup.
+
+If a PR **is** found, continue to step 2.
 
 ### 2. Check for unresolved comments
 

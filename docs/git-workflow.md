@@ -103,14 +103,16 @@ reserve that instinct for genuinely ambiguous or destructive operations;
 When a branch's work is complete and its PR is approved, use `/cohort-cleanup`.
 It:
 
-1. Identifies the PR for the current branch.
-2. Scans for unresolved actionable comments — if found, lists them and asks
-   whether a re-review is needed before merging.
-3. Presents the PR and hands the merge to the human: they merge it on GitHub
-   (merge/rebase/squash — their choice). The remote branch is also deleted by
-   the human in the GitHub UI afterwards; this is deliberately not scripted
-   (it needs GitHub authentication, and the branch is harmless after merge).
-4. After confirmation, runs `cohort-cleanup` (from the branch's
+1. Identifies the PR for the current branch (searches open, then merged/closed).
+2. If a PR is found: scans for unresolved actionable comments — if found, lists
+   them and asks whether a re-review is needed before merging.
+3. If no PR is found (merged and remote branch already deleted): asks the human
+   to confirm the merge happened, then skips to cleanup (the script's own
+   ancestor check confirms it).
+4. If the PR is still open: presents it and hands the merge to the human — they
+   merge on GitHub (merge/rebase/squash — their choice) and delete the remote
+   branch in the GitHub UI afterwards.
+5. After confirmation, runs `cohort-cleanup` (from the branch's
    worktree, no arguments): it verifies the branch tip is an ancestor of the
    remote default branch, then removes the worktree, deletes the local
    branch, and fast-forwards the default branch in the primary checkout to
@@ -119,4 +121,4 @@ It:
    else.
 
 `/cohort-cleanup` does not push and does not merge. The branch should already be
-pushed and the PR open before this command runs.
+pushed and the PR open (or already merged) before this command runs.
