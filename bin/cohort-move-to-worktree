@@ -1,0 +1,153 @@
+#!/bin/bash
+# cohort-move-to-worktree: move dirty changes from the primary checkout
+# into a new git worktree on a fresh branch. The equivalent of
+# "git checkout -b <topic>" but for worktrees.
+#
+# Usage: cohort-move-to-worktree <topic>
+set -euo pipefail
+
+TOPIC="${1:-}"
+if [[ -z "$TOPIC" ]]; then
+    echo "Usage: cohort-move-to-worktree <topic>" >&2
+    exit 1
+fi
+
+# Must be run from the primary checkout.
+if git rev-parse --git-dir | grep -q worktrees; then
+    echo "Error: this is not the primary checkout." >&2
+    echo "Run cohort-move-to-worktree from the primary checkout." >&2
+    exit 1
+fi
+WORKTREE_ROOT=$(git rev-parse --show-toplevel)
+MAIN_ROOT="$WORKTREE_ROOT"
+
+# Collect everything dirty.
+STAGED=$(git diff --staged --name-only)
+UNSTAGED=$(git diff --name-only)
+UNTRACKED=$(git ls-files --others --exclude-standard)
+DELETED=$(git diff --staged --diff-filter=D --name-only; git diff --diff-filter=D --name-only)
+
+if [[ -z "$STAGED$UNSTAGED$UNTRACKED" ]]; then
+    echo "Nothing dirty — just create a normal worktree: cohort-new-worktree $TOPIC"
+    exit 1
+fi
+
+echo "Dirty files to move:"
+if [[ -n "$STAGED" ]]; then echo "  Staged:    $(echo "$STAGED" | wc -l) files"; fi
+if [[ -n "$UNSTAGED" ]]; then echo "  Unstaged:  $(echo "$UNSTAGED" | wc -l) files"; fi
+if [[ -n "$UNTRACKED" ]]; then echo "  Untracked: $(echo "$UNTRACKED" | wc -l) files"; fi
+echo
+
+# Create the worktree. Annoyingly, git worktree add will fail if there are
+# tracked files with staged changes in a worktree it shares the working dir
+# with... but we're in the primary checkout, and the new worktree gets its
+# own checkout, so this is fine.
+BRANCH="agent/$TOPIC"
+WT_PATH="$HOME/worktrees/$TOPIC"
+
+git fetch origin
+git worktree add -b "$BRANCH" "$WT_PATH" HEAD || {
+    echo "Error: could not create worktree. Does it already exist?" >&2
+    exit 1
+}
+
+# Copy staged changes (including staged additions/deletions).
+if [[ -n "$STAGED" ]]; then
+    echo "$STAGED" | while IFS= read -r f; do
+        mkdir -p "$WT_PATH/$(dirname "$f")"
+        if git show ":$f" >/dev/null 2>&1; then
+            git show ":$f" > "$WT_PATH/$f"
+        else
+            # File is staged for deletion — remove it in the worktree.
+            rm -f "$WT_PATH/$f"
+        fi
+    done
+    # Stage them in the worktree.
+    echo "$STAGED" | while IFS= read -r f; do
+        git -C "$WT_PATH" add "$f"
+    done
+fi
+
+# Copy unstaged modifications.
+if [[ -n "$UNSTAGED" ]]; then
+    echo "$UNSTAGED" | while IFS= read -r f; do
+        mkdir -p "$WT_PATH/$(dirname "$f")"
+        if [[ -f "$WORKTREE_ROOT/$f" ]]; then
+            cp "$WORKTREE_ROOT/$f" "$WT_PATH/$f"
+        else
+            # File was deleted (unstaged) — remove it in the worktree.
+            rm -f "$WT_PATH/$f"
+        fi
+    done
+fi
+
+# Copy untracked files.
+if [[ -n "$UNTRACKED" ]]; then
+    echo "$UNTRACKED" | while IFS= read -r f; do
+        mkdir -p "$WT_PATH/$(dirname "$f")"
+        cp "$WORKTREE_ROOT/$f" "$WT_PATH/$f"
+    done
+fi
+
+# Verify: the diffs should match.
+echo
+echo "=== Verifying ==="
+
+PRIMARY_STAGED_DIFF=$(git diff --staged)
+WT_STAGED_DIFF=$(git -C "$WT_PATH" diff --staged)
+if [[ "$PRIMARY_STAGED_DIFF" != "$WT_STAGED_DIFF" ]]; then
+    echo "ERROR: staged diff mismatch! Primary and worktree diverge." >&2
+    echo "The worktree exists at $WT_PATH but was not cleaned from primary." >&2
+    exit 1
+fi
+echo "  Staged diff: match"
+
+PRIMARY_UNSTAGED_DIFF=$(git diff)
+WT_UNSTAGED_DIFF=$(git -C "$WT_PATH" diff)
+if [[ "$PRIMARY_UNSTAGED_DIFF" != "$WT_UNSTAGED_DIFF" ]]; then
+    echo "ERROR: unstaged diff mismatch! Primary and worktree diverge." >&2
+    echo "The worktree exists at $WT_PATH but was not cleaned from primary." >&2
+    exit 1
+fi
+echo "  Unstaged diff: match"
+
+# Untracked: check that the same file names exist.
+PRIMARY_UNTRACKED=$(git ls-files --others --exclude-standard | sort)
+WT_UNTRACKED=$(git -C "$WT_PATH" ls-files --others --exclude-standard | sort)
+if [[ "$PRIMARY_UNTRACKED" != "$WT_UNTRACKED" ]]; then
+    echo "ERROR: untracked file list mismatch!" >&2
+    echo "The worktree exists at $WT_PATH but was not cleaned from primary." >&2
+    exit 1
+fi
+echo "  Untracked: match"
+
+# All good — clean the primary checkout.
+echo
+echo "=== Cleaning primary checkout ==="
+
+# Discard staged changes.
+git reset --quiet HEAD
+
+# Discard unstaged modifications and untracked files.
+if [[ -n "$UNSTAGED" ]]; then
+    echo "$UNSTAGED" | while IFS= read -r f; do
+        if [[ -f "$WORKTREE_ROOT/$f" ]]; then
+            git checkout -- "$f"
+        else
+            # File was deleted — restore it.
+            git checkout -- "$f"
+        fi
+    done
+fi
+
+# Don't clobber untracked files that overlap with tracked ones.
+# Simpler: just rm untracked files.
+if [[ -n "$UNTRACKED" ]]; then
+    echo "$UNTRACKED" | while IFS= read -r f; do
+        rm -rf "$WORKTREE_ROOT/$f"
+    done
+fi
+
+echo
+echo "Done. Primary checkout is clean."
+echo "Worktree ready: $WT_PATH (branch: $BRANCH)"
