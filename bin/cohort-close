@@ -1,41 +1,72 @@
 #!/bin/bash
-# cohort-close: cleanup after a merged PR — remove worktree, delete branch,
-# checkout main, and fast-forward to latest.
-# Usage: cohort-close <project-root> <branch-name> <worktree-path>
+# cohort-close: cleanup after a merged PR.
+# Run from inside the branch's worktree — nothing else is needed:
+#   - the worktree being closed is the one the command runs from,
+#   - the branch to delete is the one checked out there,
+#   - the main checkout and default branch are derived from git itself.
+# Usage: cohort-close   (no arguments)
+# The remote branch should already be deleted by `gh pr merge --delete-branch`.
 set -e
 
-PROJECT_ROOT="$1"
-BRANCH="$2"
-WORKTREE="$3"
+# The worktree to close is the one we're standing in.
+WORKTREE=$(git rev-parse --show-toplevel)
 
-if [[ -z "$PROJECT_ROOT" || -z "$BRANCH" ]]; then
-    echo "Usage: cohort-close <project-root> <branch-name> <worktree-path>" >&2
+# The branch checked out here is the one being closed.
+BRANCH=$(git branch --show-current)
+if [[ -z "$BRANCH" ]]; then
+    echo "Error: detached HEAD in $WORKTREE — nothing to close" >&2
     exit 1
 fi
 
-cd "$PROJECT_ROOT"
+# The main checkout owns the shared git dir (the parent of .git).
+MAIN_ROOT=$(dirname "$(git rev-parse --git-common-dir)")
 
-# 1. Delete the remote branch
-git push origin --delete "$BRANCH" 2>/dev/null || echo "(remote branch $BRANCH already deleted or not found)"
-
-# 2. Remove the worktree if given
-if [[ -n "$WORKTREE" && -d "$WORKTREE/.git" ]]; then
-    git worktree remove "$WORKTREE" 2>/dev/null || git worktree remove --force "$WORKTREE"
-    echo "Removed worktree: $WORKTREE"
+if [[ "$WORKTREE" == "$MAIN_ROOT" ]]; then
+    echo "Error: this is the main checkout, not a worktree." >&2
+    echo "Run cohort-close from the branch's worktree instead." >&2
+    exit 1
 fi
 
-# 3. Prune the branch locally (it's merged, so safe to force-delete)
-git branch -D "$BRANCH" 2>/dev/null || echo "(local branch $BRANCH already deleted)"
+# All git operations run from the main checkout, where the metadata lives.
+cd "$MAIN_ROOT"
 
-# 4. Checkout main and fast-forward
+# 1. Remove the worktree. No --force: a dirty or locked worktree is left
+#    in place with a warning instead of silently discarding work.
+if git worktree remove "$WORKTREE"; then
+    echo "Removed worktree: $WORKTREE"
+else
+    echo "Warning: could not remove worktree $WORKTREE (dirty or locked) — left in place" >&2
+fi
+
+# 2. Delete the now-merged local branch. Fails safely if it's already gone
+#    or still checked out somewhere.
+git branch -D "$BRANCH" 2>/dev/null || echo "(local branch $BRANCH already gone or still in use)"
+
+# 3. Fast-forward the default branch in the main checkout.
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|^refs/remotes/origin/||')
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+    for candidate in main master; do
+        if git show-ref --verify --quiet "refs/remotes/origin/$candidate"; then
+            DEFAULT_BRANCH="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+    echo "Error: can't determine the default branch." >&2
+    echo "Set it with: git remote set-head origin -a" >&2
+    exit 1
+fi
+
 current=$(git branch --show-current)
-if [[ "$current" != "main" ]]; then
-    git checkout main
+if [[ "$current" != "$DEFAULT_BRANCH" ]]; then
+    git checkout "$DEFAULT_BRANCH"
 fi
 git fetch origin
-if git merge --ff-only origin/main; then
-    echo "main is now at: $(git log -1 --oneline)"
+if git merge --ff-only "origin/$DEFAULT_BRANCH"; then
+    echo "$DEFAULT_BRANCH is now at: $(git log -1 --oneline)"
 else
-    echo "Warning: main could not fast-forward. Inspect with: git log origin/main..HEAD" >&2
+    echo "Warning: $DEFAULT_BRANCH could not fast-forward (local history diverged)." >&2
+    echo "Inspect with: git log origin/$DEFAULT_BRANCH..HEAD" >&2
     exit 1
 fi

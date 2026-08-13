@@ -46,14 +46,13 @@ If unresolved comments exist:
 - Local branch that will be deleted
 - main will be checked out and fast-forwarded
 
-If the user confirms:
+If the merge succeeds, confirm the new HEAD on main, then run the script from
+the branch's worktree (no arguments — it derives everything from context):
 
 ```
-cohort-close $(git rev-parse --show-toplevel) <branch-name> <worktree-path>
+cohort-close
 ```
 
-This deletes the remote branch (if it survives), removes the worktree,
-force-deletes the local branch, checks out main, and fast-forwards to
-origin/main.
-
-Confirm the new HEAD on main.
+This removes the current worktree, force-deletes the local branch, checks out
+main, and fast-forwards to origin/main. The remote branch should already be
+gone (deleted by `gh pr merge --delete-branch`).

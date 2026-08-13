@@ -106,9 +106,10 @@ It:
 2. Scans for unresolved actionable comments — if found, lists them and asks
    whether a re-review is needed before merging.
 3. Merges (squash by default, via `gh pr merge`).
-4. After confirmation, runs `cohort-close` to delete the remote branch,
-   remove the worktree, delete the local branch, and fast-forward main to
-   the latest `origin/main`.
+4. After confirmation, runs `cohort-close` (from the branch's worktree, no
+   arguments) to remove the worktree and delete the local branch, then
+   fast-forwards the default branch in the main checkout to the latest
+   `origin/<default>`.
 
 `/git-close` does not push. The branch should already be pushed and the PR
 open before this command runs. If the merge fails (conflicts, failing
