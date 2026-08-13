@@ -55,13 +55,17 @@ fi
 
 if [[ ":$PATH:" != *":$HOME/.cohort/bin:"* && ":$PATH:" != *":~/.cohort/bin:"* ]]; then
     echo ""
-    echo "⚠  ~/.cohort/bin is not on your PATH."
-    echo "   Add this to ~/.profile:"
+    echo "⚠  ~/.cohort/bin is not on your PATH. Add this:"
     echo "       export PATH=\"\$HOME/.cohort/bin:\$PATH\""
     echo ""
-    echo "   Use ~/.profile, not ~/.bashrc: agents invoke these scripts from"
-    echo "   non-interactive shells, and Ubuntu's ~/.bashrc returns early when"
-    echo "   not interactive — a PATH export there never runs for an agent."
+    echo "   Put it in the file your login shell reads:"
+    echo "     bash — the first of ~/.bash_profile, ~/.bash_login, ~/.profile"
+    echo "            that exists (later ones are skipped entirely)"
+    echo "     zsh  — ~/.zprofile (zsh does not read ~/.profile)"
+    echo ""
+    echo "   Avoid ~/.bashrc and ~/.zshrc: agents run these scripts from"
+    echo "   non-interactive shells, and both files are commonly guarded to"
+    echo "   do nothing when not interactive."
     echo ""
 fi
 

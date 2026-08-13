@@ -19,13 +19,17 @@ url=$(git remote get-url origin 2>/dev/null) || {
     exit 1
 }
 
-# Accept both https://host/owner/repo and git@host:owner/repo.
+# Strip the parts around the host, then require what's left to look like a
+# hostname. Anything else (a local path, a file:// URL, an empty remote) is
+# rejected rather than passed to gh as a bogus GH_HOST.
+#   https://host/owner/repo  git@host:owner/repo  ssh://git@host:22/owner/repo
 host=${url#*://}       # strip scheme, if any
 host=${host#*@}        # strip user@, if any
 host=${host%%[:/]*}    # keep up to the first : or /
 
-if [[ -z "$host" ]]; then
-    echo "cohort-gh: could not parse a host from origin URL: $url" >&2
+if [[ ! "$host" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+    echo "cohort-gh: origin does not look like a hosted git URL: $url" >&2
+    echo "cohort-gh: could not determine a GitHub host to target." >&2
     exit 1
 fi
 

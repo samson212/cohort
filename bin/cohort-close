@@ -81,8 +81,12 @@ if ! git worktree remove "$WORKTREE"; then
 fi
 echo "Removed worktree: $WORKTREE"
 
-# 2. Delete the now-merged local branch. Fails safely if it's already gone.
-git branch -D "$BRANCH" 2>/dev/null || echo "(local branch $BRANCH already gone)"
+# 2. Delete the now-merged local branch.
+if git branch -D "$BRANCH"; then
+    echo "Deleted branch: $BRANCH"
+else
+    echo "(local branch $BRANCH already gone)"
+fi
 
 # 3. Fast-forward the default branch in the primary checkout.
 current=$(git branch --show-current)
