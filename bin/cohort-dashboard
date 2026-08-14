@@ -237,7 +237,6 @@ function render(data) {
   const cards = `
     <div class="card"><div class="num">${tWork}</div><div class="lbl">worktrees</div><div class="sub">${tDirty} dirty</div></div>
     <div class="card"><div class="num">${tPRs}</div><div class="lbl">open PRs</div><div class="sub">across repos</div></div>
-    <div class="card"><div class="num">${tDirty}</div><div class="lbl">dirty worktrees</div><div class="sub">uncommitted changes</div></div>
     <div class="card"><div class="num">${tOrphan}</div><div class="lbl">merged orphans</div><div class="sub">branches to clean up</div></div>`;
   document.getElementById('summary').innerHTML = cards;
 
