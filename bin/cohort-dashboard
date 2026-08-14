@@ -130,7 +130,7 @@ PAGE = """<!doctype html>
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: var(--panel2); }
   .branch { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-  .branch.dead s { color: var(--muted); opacity: .7; text-decoration-thickness: 1.5px; }
+  .dead { color: var(--muted); opacity: .7; text-decoration-thickness: 1.5px; }
   .subj { color: var(--muted); font-size: 12.5px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .badge {
     display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
@@ -225,8 +225,14 @@ function branchCell(repo, name, opts = {}) {
   if (url) {
     return `<td class="branch"><a href="${url}" target="_blank" rel="noopener">${inner}</a>${suffix}${sub}</td>`;
   }
-  // Not on the remote: nothing to link to — render dead with strikethrough.
-  return `<td class="branch dead"><s>${inner}</s>${suffix}${sub}</td>`;
+  // Not on the remote: nothing to link to. Deleted branches (were on the
+  // remote, no longer are) are struck through so the operator can see they
+  // once existed; local-only branches just render plain — no link, no
+  // decoration.
+  if (opts.deleted) {
+    return `<td class="branch dead"><s>${inner}</s>${suffix}${sub}</td>`;
+  }
+  return `<td class="branch">${inner}${suffix}${sub}</td>`;
 }
 
 function statusBadge(wt, repo) {
@@ -300,6 +306,7 @@ function render(data) {
       <tr>
         ${branchCell(repo, wt.branch, {
           onRemote: wt.on_remote,
+          deleted: !!wt.deleted,
           sub: wt.subject && !wt.is_primary ? fmt.esc(wt.subject) : '',
           suffix: wt.is_primary ? '<span class="pill" title="primary checkout">main</span>' : ''
         })}
@@ -308,23 +315,23 @@ function render(data) {
         <td>${wt.behind ? `<span class="err">▼${wt.behind}</span>` : ''}${wt.ahead ? `<a href="${compareUrl(repo, repo.default_branch, wt.branch)}" target="_blank" rel="noopener"><span class="badge yellow">▲${wt.ahead}</span></a>` : ''} ${wt.commits_since_default ? `<span class="pill">+${wt.commits_since_default}</span>` : ''}</td>
         <td>${fmt.age(wt.days_since_last_commit)} ago</td>
         <td>${prBadge(wt, repo)}</td>
-        <td>${wt.head_short ? (wt.on_remote ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : `<s class="dead">${fmt.esc(wt.head_short)}</s>`) : ''}</td>
+        <td>${wt.head_short ? (wt.on_remote || wt.deleted ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : `<span>${fmt.esc(wt.head_short)}</span>`) : ''}</td>
       </tr>`).join('');
     const orphanRows = orphans.map(o => `
       <tr>
-        ${branchCell(repo, o.branch, { onRemote: o.on_remote })}
+        ${branchCell(repo, o.branch, { onRemote: o.on_remote, deleted: !!o.deleted })}
         <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.status === 'merged' ? 'merged' : 'orphan'}</span>`}</td>
         <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
         <td>${fmt.age(o.days_since_last_commit)} ago</td>
-        <td colspan="2">${o.head_short ? (o.on_remote ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<s class="dead">${fmt.esc(o.head_short)}</s>`) : fmt.esc(o.upstream_ref || '')}</td>
+        <td colspan="2">${o.head_short ? (o.on_remote || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : fmt.esc(o.upstream_ref || '')}</td>
       </tr>`).join('');
     const remoteRows = (repo.remote_only || []).map(o => `
       <tr>
-        ${branchCell(repo, o.branch, { onRemote: true })}
+        ${branchCell(repo, o.branch, { onRemote: o.on_remote !== false, deleted: !!o.deleted })}
         <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.merged ? 'merged' : 'remote'}</span>`}</td>
         <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
         <td>${fmt.age(o.days_since_last_commit)} ago</td>
-        <td colspan="2">${o.head_short ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : ''}</td>
+        <td colspan="2">${o.head_short ? (o.on_remote !== false || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : ''}</td>
       </tr>`).join('');
     const prRows = open.map(pr => prRow(pr, repo)).join('');
     const remoteOnly = repo.remote_only || [];

@@ -37,6 +37,33 @@ def gh(cwd, *args):
     return (rc, out, err)
 
 
+def live_branches(repo):
+    """Branch names that exist on the origin remote right now.
+
+    refs/remotes/origin/* goes stale: after a PR merges and its branch is
+    deleted on GitHub, the local remote-tracking ref lingers until a prune,
+    so prep's on_remote (derived from those refs) over-reports branches
+    that would 404. One ls-remote is cheap next to the gh calls we already
+    make and reflects upstream truth.
+
+    Returns None when the check fails (network hiccup, no origin) — callers
+    then keep the prep-derived values rather than guessing.
+    """
+    root = repo.get("root")
+    if not root or not os.path.isdir(root):
+        return None
+    rc, out, _ = run(["git", "-C", root, "ls-remote", "--heads", "origin"], timeout=30)
+    if rc != 0:
+        return None
+    names = {
+        line.split("\t")[-1].removeprefix("refs/heads/")
+        for line in out.splitlines()
+        if "\t" in line
+    }
+    names.discard("")
+    return names
+
+
 def collect_prs(repo):
     """Return {branch: {…pr fields…}, '__open__': [pr, …], '__web__': url} for one repo.
 
@@ -112,6 +139,29 @@ def main():
         web = prs.get("__web__")
         if web:
             repo["web"] = web
+        # Reconcile on_remote against the actual live branches: refs/
+        # remotes/origin/* can hold refs whose upstream branch was deleted
+        # (merged PR heads). Those must be struck through, not linked.
+        live = live_branches(repo)
+        if live is not None:
+            for label, group in (("worktrees", repo.get("worktrees", [])),
+                                 ("orphans", repo.get("orphans", [])),
+                                 ("remote_only", repo.get("remote_only", []))):
+                for entry in group:
+                    existed = entry.get("on_remote", False)
+                    entry["on_remote"] = entry.get("branch", "") in live
+                    if label == "remote_only":
+                        # remote_only entries are remote-tracking refs by
+                        # definition — if the live check no longer sees
+                        # them, the branch was deleted on the remote.
+                        deleted = not entry["on_remote"]
+                    else:
+                        # Deleted = was on the remote but isn't anymore
+                        # (struck through). Local-only branches (never
+                        # pushed, no upstream) get no link and no
+                        # decoration.
+                        deleted = bool(existed) and not entry["on_remote"]
+                    entry["deleted"] = deleted
         for group in (repo.get("worktrees", []),
                       repo.get("orphans", []),
                       repo.get("remote_only", [])):

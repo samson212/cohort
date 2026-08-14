@@ -21,7 +21,8 @@ one page so an operator can see, at a glance:
 - which worktrees have uncommitted changes (and how many files)
 - which branches are ahead of / behind their upstream or the default branch
 - which PRs are open, draft, or merged for each branch
-- which branches exist locally but were never pushed (struck through)
+- which branches exist locally but were never pushed (unlinked, no decoration)
+- which branches were deleted from the remote after their PR merged (struck through)
 - which branches exist only on the remote (no local ref, no worktree)
 - which local branches no longer have a worktree (cleanup candidates)
 
@@ -132,9 +133,16 @@ For each worktree, a single status string drives the pill and the summary:
 |---|---|---|
 | `dirty` | uncommitted changes present | PR page, else compare |
 | `unpushed` | ahead of upstream (commits not pushed) | PR, else compare |
-| `new` | no upstream; on_remote false (never pushed) | none (struck through) |
-| `noupstream` | no upstream; local only | none (struck through) |
+| `new` | no upstream; on_remote false (never pushed) | none (unlinked) |
+| `noupstream` | no upstream; local only | none (unlinked) |
 | `idle` | up to date, clean | tree page (or PR) |
+
+`on_remote` carries the final say on tree/compare linkability regardless of
+status: a branch deleted from the remote (idle, merged PR) loses its
+tree/compare links and its name is struck through — its PR page (if any)
+and head-SHA link (the merged commit lives in the default branch) still
+link. Branches that were never on the remote (new/noupstream) are
+unlinked but not struck through: no decoration, they just don't link.
 
 `dirty` wins. If there is a PR for the branch, its PR page is linked
 regardless of status.
@@ -155,10 +163,19 @@ the canonical public URL, so all links use it. When gh is unavailable
 (`COHORT_NO_GH` or a failed call), prep's origin-derived URL is the
 fallback — degraded but functional.
 
-Branches not on the remote (never pushed / deleted upstream) have no
-`/tree/`, `/commit/`, or `/compare/` page. They are rendered unlinked
-with a strikethrough, alongside a head SHA strikethrough, so the operator
-can see they exist but isn't handed a 404.
+Branches not on the remote have no `/tree/`, `/commit/`, or `/compare/`
+page. How they render depends on why they're not on the remote:
+
+- **Deleted upstream** (was on the remote, branch removed after the PR
+  merged): the branch name gets a strikethrough and no tree/compare link.
+  The head SHA still links to `/commit/<sha>` — the merged commit is
+  reachable from the default branch, so that page is alive.
+- **Local-only** (never pushed / no upstream): unlinked and plain — no
+  strikethrough, no decoration. The head SHA is also unlinked (those
+  commits don't exist on GitHub).
+
+Both keep their PR badge if a PR exists — the PR page is still valid after
+its branch head is deleted.
 
 PR URLs from gh are re-homed to `repo.web`'s host if they differ (gh can
 return the canonical `github.com` host even when the API went through a
@@ -228,6 +245,27 @@ auto-discovery.
 Remote-only detection uses `git for-each-ref refs/remotes/origin/`,
 filtering symbolic refs (`origin/HEAD`), the default branch, and `pr/*`
 refs (GitHub's pull-request refs aren't branches).
+
+### Live-branch reconciliation
+
+`refs/remotes/origin/*` goes stale: after a PR merges and its branch is
+deleted on GitHub, the remote-tracking ref lingers until a prune, so
+prep's `on_remote` (derived from those refs) can claim a branch exists
+upstream when it doesn't — handing the browser a `/tree/` or `/compare/`
+URL that 404s. The pr stage reconciles this: it runs one cheap
+git ls-remote --heads origin and rewrites `on_remote` for every
+worktree/orphan/remote-only entry to reflect which branches actually exist
+right now, and tags each entry `deleted` when it was on the remote but no
+longer is (struck through). Local-only branches — never pushed, no
+upstream — are `deleted: false` and render unlinked with no decoration.
+Deleted branches keep their PR badge (the PR page is still valid) and
+their head-SHA link (the merged commit exists in the default branch), but
+lose their tree/compare links. When the ls-remote fails (no origin,
+network hiccup), prep's values are kept rather than guessed at.
+The server's `no_gh=1` fast path skips this stage entirely, so it shows
+the prep-derived (possibly optimistic) `on_remote` — acceptable, since
+that path is for when the network is down, when GitHub pages are
+unreachable anyway.
 
 ## Not implemented / future work
 
