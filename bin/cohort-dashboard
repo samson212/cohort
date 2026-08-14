@@ -130,6 +130,7 @@ PAGE = """<!doctype html>
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: var(--panel2); }
   .branch { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  .branch.dead s { color: var(--muted); opacity: .7; text-decoration-thickness: 1.5px; }
   .subj { color: var(--muted); font-size: 12.5px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .badge {
     display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
@@ -216,12 +217,16 @@ function prUrl(repo, raw) {
 }
 
 function branchCell(repo, name, opts = {}) {
-  const url = opts.url || treeUrl(repo, name);
+  const onRemote = opts.onRemote !== false;  // default: assume it exists
+  const url = onRemote ? (opts.url || treeUrl(repo, name)) : '';
   const inner = fmt.esc(name);
   const suffix = opts.suffix ? ` ${opts.suffix}` : '';
   const sub = opts.sub ? `<div class="subj">${opts.sub}</div>` : '';
-  const href = url ? ` href="${url}" target="_blank" rel="noopener"` : '';
-  return `<td class="branch"><a${href}>${inner}</a>${suffix}${sub}</td>`;
+  if (url) {
+    return `<td class="branch"><a href="${url}" target="_blank" rel="noopener">${inner}</a>${suffix}${sub}</td>`;
+  }
+  // Not on the remote: nothing to link to — render dead with strikethrough.
+  return `<td class="branch dead"><s>${inner}</s>${suffix}${sub}</td>`;
 }
 
 function statusBadge(wt, repo) {
@@ -237,8 +242,9 @@ function statusBadge(wt, repo) {
   //   dirty/unpushed/new -> compare default...branch (what's ahead)
   //   idle -> the tree (nothing to compare)
   //   noupstream -> tree too (no PR link)
+  //   local-only (never pushed) -> no page exists; no link
   let href = '';
-  if (repo && repo.web) {
+  if (repo && repo.web && wt.on_remote !== false) {
     if (wt.pr_number) href = prUrl(repo, wt.pr_url);
     else if (wt.status === 'unpushed' || wt.status === 'dirty' || wt.status === 'new')
       href = compareUrl(repo, repo.default_branch, wt.branch);
@@ -293,6 +299,7 @@ function render(data) {
     const rows = wts.map(wt => `
       <tr>
         ${branchCell(repo, wt.branch, {
+          onRemote: wt.on_remote,
           sub: wt.subject && !wt.is_primary ? fmt.esc(wt.subject) : '',
           suffix: wt.is_primary ? '<span class="pill" title="primary checkout">main</span>' : ''
         })}
@@ -301,19 +308,19 @@ function render(data) {
         <td>${wt.behind ? `<span class="err">▼${wt.behind}</span>` : ''}${wt.ahead ? `<a href="${compareUrl(repo, repo.default_branch, wt.branch)}" target="_blank" rel="noopener"><span class="badge yellow">▲${wt.ahead}</span></a>` : ''} ${wt.commits_since_default ? `<span class="pill">+${wt.commits_since_default}</span>` : ''}</td>
         <td>${fmt.age(wt.days_since_last_commit)} ago</td>
         <td>${prBadge(wt, repo)}</td>
-        <td>${wt.head_short ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : ''}</td>
+        <td>${wt.head_short ? (wt.on_remote ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : `<s class="dead">${fmt.esc(wt.head_short)}</s>`) : ''}</td>
       </tr>`).join('');
     const orphanRows = orphans.map(o => `
       <tr>
-        ${branchCell(repo, o.branch)}
+        ${branchCell(repo, o.branch, { onRemote: o.on_remote })}
         <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.status === 'merged' ? 'merged' : 'orphan'}</span>`}</td>
         <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
         <td>${fmt.age(o.days_since_last_commit)} ago</td>
-        <td colspan="2">${o.head_short ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : fmt.esc(o.upstream_ref || '')}</td>
+        <td colspan="2">${o.head_short ? (o.on_remote ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<s class="dead">${fmt.esc(o.head_short)}</s>`) : fmt.esc(o.upstream_ref || '')}</td>
       </tr>`).join('');
     const remoteRows = (repo.remote_only || []).map(o => `
       <tr>
-        ${branchCell(repo, o.branch)}
+        ${branchCell(repo, o.branch, { onRemote: true })}
         <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.merged ? 'merged' : 'remote'}</span>`}</td>
         <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
         <td>${fmt.age(o.days_since_last_commit)} ago</td>

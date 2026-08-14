@@ -301,6 +301,23 @@ def branch_is_merged_into(cwd, branch, base):
     return rc == 0
 
 
+def remote_branch_set(cwd):
+    """Set of branch names that exist on origin (refs/remotes/origin/*).
+
+    Branches that only exist locally (never pushed, or deleted upstream)
+    have no corresponding remote ref — linking them to a /tree page 404s.
+    """
+    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
+                      "--format=%(refname:short)", "refs/remotes/origin/"])
+    names = set()
+    if rc == 0:
+        for line in out.splitlines():
+            br = line.removeprefix("origin/")
+            if br and br != "HEAD":
+                names.add(br)
+    return names
+
+
 def remote_only_branches(cwd, default):
     """Remote-tracking branches with no local branch and no worktree.
 
@@ -370,6 +387,7 @@ def scan_repo(root):
     entry["web"] = web_url_of_remote(entry["remote"])
     db = entry["default_branch"] = default_branch(toplevel)
     ups = upstream_map(toplevel)
+    remote_names = remote_branch_set(toplevel)
     entry["worktrees"] = []
     entry["orphans"] = []
     entry["remote_only"] = remote_only_branches(toplevel, db)
@@ -386,6 +404,7 @@ def scan_repo(root):
             "path": path,
             "branch": branch,
             "is_primary": path == toplevel,
+            "on_remote": branch in remote_names,
             "head": wt.get("head", ""),
             "head_short": (wt.get("head") or "")[:12],
         }
@@ -435,6 +454,7 @@ def scan_repo(root):
     for ob in orphan_branches(toplevel, worktree_branches):
         br = ob["branch"]
         ob["has_upstream"] = bool(ob.get("upstream_ref"))
+        ob["on_remote"] = br in remote_names
         ob["merged"] = branch_is_merged_into(toplevel, br, f"origin/{db}")
         ob["commits_since_default"] = count_commits(toplevel, f"origin/{db}..{br}")
         ob.update(branch_info(toplevel, br))
