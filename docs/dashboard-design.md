@@ -103,7 +103,7 @@ One JSON document per scrape:
   "has_upstream": true, "upstream_ref": "origin/agent/foo",
   "ahead": 2, "behind": 0, "commits_since_default": 2,
   "subject": "…", "last_commit_at": "…Z", "days_since_last_commit": 1.2,
-  "status": "dirty",           # dirty | unpushed | new | noupstream | idle
+  "status": "dirty",           # dirty | unpushed | deleted | up to date | local
   "pr_number": 12, "pr_state": "MERGED", "pr_url": "https://github.com/…/pull/12",
   "pr_draft": false, "pr_created_at": "…", "pr_updated_at": "…",
   "pr_review_decision": "APPROVED", "pr_mergeable": "MERGEABLE",
@@ -127,22 +127,23 @@ cleaned-up merged PR head). Fields: `branch`, `head`, `head_short`,
 
 ## Status classification
 
-For each worktree, a single status string drives the pill and the summary:
+For each worktree, a single status string drives the pill. It is computed
+in the pr stage, after live-branch reconciliation, so the label reflects
+reality (prep's local-git-only status is overwritten for worktrees):
 
 | status | meaning | link behavior |
 |---|---|---|
 | `dirty` | uncommitted changes present | PR page, else compare |
 | `unpushed` | ahead of upstream (commits not pushed) | PR, else compare |
-| `new` | no upstream; on_remote false (never pushed) | none (unlinked) |
-| `noupstream` | no upstream; local only | none (unlinked) |
-| `idle` | up to date, clean | tree page (or PR) |
+| `deleted` | was on the remote, branch removed after merge | PR page, else none |
+| `up to date` | clean, exists on the remote | tree page (or PR) |
+| `local` | clean, never pushed / no upstream | none (unlinked) |
 
-`on_remote` carries the final say on tree/compare linkability regardless of
-status: a branch deleted from the remote (idle, merged PR) loses its
-tree/compare links and its name is struck through — its PR page (if any)
-and head-SHA link (the merged commit lives in the default branch) still
-link. Branches that were never on the remote (new/noupstream) are
-unlinked but not struck through: no decoration, they just don't link.
+`deleted` carries the final say on tree/compare linkability: a branch
+deleted from the remote loses its tree/compare links and its name is
+struck through — its PR page (if any) and head-SHA link (the merged commit
+lives in the default branch) still link. `local` branches are unlinked but
+not struck through: no decoration, they just don't link.
 
 `dirty` wins. If there is a PR for the branch, its PR page is linked
 regardless of status.

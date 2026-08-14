@@ -237,24 +237,26 @@ function branchCell(repo, name, opts = {}) {
 
 function statusBadge(wt, repo) {
   const map = {
-    dirty:   ['red',   '● dirty'],
-    unpushed:['yellow','▲ unpushed'],
-    idle:    ['gray',  '○ idle'],
-    new:     ['purple','✚ new'],
-    noupstream: ['gray', 'no upstream'],
+    dirty:    ['red',   'dirty'],
+    unpushed: ['yellow','unpushed'],
+    deleted:  ['purple', 'deleted'],
+    'up to date': ['green', 'up to date'],
+    local:    ['gray',  'local'],
   };
   const [cls, txt] = map[wt.status] || ['gray', wt.status];
   // Make the pill itself link to the GitHub page that explains it:
-  //   dirty/unpushed/new -> compare default...branch (what's ahead)
-  //   idle -> the tree (nothing to compare)
-  //   noupstream -> tree too (no PR link)
-  //   local-only (never pushed) -> no page exists; no link
+  //   dirty/unpushed → compare default...branch (what's ahead)
+  //   up to date → the tree (nothing to compare)
+  //   local (never pushed) → no page exists; no link
+  //   deleted → no tree page (branch is gone); PR links if present
   let href = '';
   if (repo && repo.web && wt.on_remote !== false) {
     if (wt.pr_number) href = prUrl(repo, wt.pr_url);
-    else if (wt.status === 'unpushed' || wt.status === 'dirty' || wt.status === 'new')
+    else if (wt.status === 'unpushed' || wt.status === 'dirty')
       href = compareUrl(repo, repo.default_branch, wt.branch);
     else href = treeUrl(repo, wt.branch);
+  } else if (wt.deleted && repo && repo.web && wt.pr_number) {
+    href = prUrl(repo, wt.pr_url);
   }
   const span = `<span class="badge ${cls}">${txt}</span>`;
   return href ? `<a href="${href}" target="_blank" rel="noopener">${span}</a>` : span;

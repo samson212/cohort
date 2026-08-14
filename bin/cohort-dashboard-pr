@@ -129,6 +129,35 @@ def enrich(entry, pr):
     entry["pr_head_sha_matches"] = bool(head) and entry.get("head_short") == head[:12]
 
 
+def status_after_reconcile(entry):
+    """Reclassify a worktree's status once live-remote truth is known.
+
+    prep's status only knows what local git refs say: a clean branch whose
+    remote-tracking ref lingers (merged PR, branch deleted upstream) is
+    tagged "idle" even though its GitHub page is gone, and a never-pushed
+    branch is "noupstream". Now that on_remote/deleted reflect reality,
+    tighten the labels so the pill says what's actually true:
+
+      dirty       uncommitted changes (unchanged)
+      unpushed    ahead of upstream (unchanged)
+      deleted     was on the remote, no longer is (merged then removed)
+      up to date  clean, exists on the remote
+      local       clean, never pushed / no upstream
+
+    Only worktrees are reclassified; orphans/remote-only keep their own
+    status semantics.
+    """
+    if entry.get("dirty_files"):
+        return "dirty"
+    if entry.get("ahead"):
+        return "unpushed"
+    if entry.get("deleted"):
+        return "deleted"
+    if entry.get("on_remote"):
+        return "up to date"
+    return "local"
+
+
 def main():
     payload = json.load(sys.stdin)
     for repo in payload.get("repos", []):
@@ -162,6 +191,8 @@ def main():
                         # decoration.
                         deleted = bool(existed) and not entry["on_remote"]
                     entry["deleted"] = deleted
+                    if label == "worktrees":
+                        entry["status"] = status_after_reconcile(entry)
         for group in (repo.get("worktrees", []),
                       repo.get("orphans", []),
                       repo.get("remote_only", [])):

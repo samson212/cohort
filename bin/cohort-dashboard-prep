@@ -29,7 +29,7 @@ Writes JSON to stdout:
           "has_upstream": true, "upstream_ref": "origin/agent/x",
           "ahead": 2, "behind": 0,
           "commits_since_default": 2,
-          "status": "unpushed"   # clean | dirty | unpushed | new | idle
+          "status": "unpushed"   # dirty | unpushed | new | noupstream | idle (fallback; pr re-derives)
         } ]
       } ]
     }
@@ -266,10 +266,6 @@ def branch_info(cwd, branch):
     return info
 
 
-def classify(status):
-    return status
-
-
 def orphan_branches(cwd, worktree_map):
     """Local branches with no worktree and no upstream (or merged ones).
 
@@ -439,7 +435,9 @@ def scan_repo(root):
         else:
             item["days_since_last_commit"] = None
 
-        # Classification: clean | dirty | unpushed | new (no upstream) | idle
+        # Classification (local-git only; the pr stage re-derives worktree
+        # status after live-branch reconciliation, so this is a fallback,
+        # not the source of truth)
         if item["dirty_files"]:
             status = "dirty"
         elif not item["has_upstream"]:
