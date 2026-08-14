@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+"""cohort-dashboard-prep: gather worktree/branch metadata for the Cohort dashboard.
+
+The data-collection half, separated from the server so git logic stays
+testable on its own:
+
+    cohort-dashboard-prep [--repos FILE]
+
+Writes JSON to stdout:
+
+    {
+      "generated_at": "2026-08-14T…Z",
+      "repos": [ {
+        "root": "/home/exedev",
+        "name": "exedev",
+        "remote": "git@github.com:samson212/cohort.git",
+        "host": "github.com",
+        "default_branch": "main",
+        "worktrees": [ {
+          "path": "…",
+          "branch": "agent/x",
+          "is_primary": false,
+          "head": "sha",
+          "head_short": "abc1234",
+          "subject": "…",
+          "last_commit_at": "…",
+          "days_since_last_commit": 1.2,
+          "dirty_files": 3, "staged": 1, "unstaged": 2, "untracked": 1,
+          "has_upstream": true, "upstream_ref": "origin/agent/x",
+          "ahead": 2, "behind": 0,
+          "commits_since_default": 2,
+          "status": "unpushed"   # clean | dirty | unpushed | new | idle
+        } ]
+      } ]
+    }
+
+Everything here is local git reads — no network, no gh. PR enrichment is the
+server half's job (network calls are slow and can fail; git reads aren't).
+"""
+
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+CONFIG_FILE = os.path.expanduser("~/.config/cohort-dashboard/repos")
+
+
+def run(args, cwd=None):
+    try:
+        proc = subprocess.run(
+            args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, timeout=15,
+        )
+        return (proc.returncode, proc.stdout.strip(), proc.stderr.strip())
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return (1, "", str(exc))
+
+
+def git(cwd, *args):
+    rc, out, _ = run(["git", "-C", cwd, *args])
+    return out if rc == 0 else ""
+
+
+def find_git_roots(start, max_depth=3):
+    """Bounded walk for git roots under `start`.
+
+    Returns absolute paths, de-duplicated. Stops descending into a dir once
+    it proves to be a git root (nested repos are rare and intentional).
+    """
+    found = []
+    base_depth = start.rstrip(os.sep).count(os.sep)
+    for root, dirs, files in os.walk(start):
+        depth = root.count(os.sep) - base_depth
+        is_repo = ".git" in dirs or ".git" in files
+        # prune very deep / foreign dirs (but never .git itself
+        # before the repo check above has seen it)
+        dirs[:] = [d for d in dirs
+                   if not d.startswith(".") or d == ".git"
+                   if d not in ("node_modules", "target", "vendor", "Library", "Applications")]
+        if is_repo:
+            found.append(os.path.abspath(root))
+            dirs[:] = []  # don't descend further into a repo
+            continue
+        if depth >= max_depth:
+            dirs[:] = []
+    # de-dup preserving order
+    return list(dict.fromkeys(found))
+
+
+def discover_repos():
+    """Repos to scan: --repos FILE > config file > auto-discover.
+
+    Auto-discovery walks $HOME a few levels looking for git roots — this
+    catches ~/cohort (the engine), any project directory, and every worktree
+    under ~/worktrees/. Repos are de-duplicated by their actual git root
+    (all worktrees of one project report the same toplevel).
+    """
+    explicit = None
+    if len(sys.argv) > 1 and sys.argv[1] == "--repos":
+        explicit = sys.argv[2]
+    elif os.path.exists(CONFIG_FILE):
+        explicit = CONFIG_FILE
+
+    if explicit:
+        repos = []
+        with open(explicit) as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    repos.append(os.path.abspath(os.path.expanduser(line)))
+        return repos
+    return find_git_roots(os.path.expanduser("~"))
+
+
+def git_common_root_of(path):
+    """The primary checkout root owning this worktree's git metadata.
+
+    Different from --show-toplevel (which returns the worktree's own root):
+    all worktrees of one repo share a common git dir, and the primary
+    checkout is its parent. This is what makes dedup and canonical-naming
+    correct.
+    """
+    rc, out, _ = run(["git", "-C", path, "rev-parse", "--git-common-dir"])
+    if rc != 0 or not out:
+        return None
+    common = os.path.abspath(os.path.join(path, out))
+    # If common dir is a .git file, resolve its gitdir target.
+    if os.path.isfile(common):
+        try:
+            with open(common) as fh:
+                for line in fh:
+                    if line.startswith("gitdir:"):
+                        common = os.path.abspath(os.path.join(os.path.dirname(common), line.split(":", 1)[1].strip()))
+                        break
+        except OSError:
+            pass
+    # Primary checkout root = parent of the common git dir.
+    if os.path.basename(common.rstrip(os.sep)).endswith(".git"):
+        return os.path.dirname(common.rstrip(os.sep))
+    # A standalone repo: common dir is not .git's parent — use toplevel.
+    tl = git_root_of(path)
+    return tl
+
+
+def git_root_of(path):
+    rc, out, _ = run(["git", "-C", path, "rev-parse", "--show-toplevel"])
+    return out if rc == 0 else None
+
+
+def host_of_remote(url):
+    if not url:
+        return ""
+    host = url.split("//", 1)[-1]  # strip scheme
+    host = host.split("@", 1)[-1]  # strip user@
+    host = host.split("$", 1)[0].split(":", 1)[0].split("/", 1)[0]  # scp-style: [host:]path
+    return host
+
+
+def default_branch(cwd):
+    out = git(cwd, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if out:
+        return out.replace("refs/remotes/origin/", "")
+    for cand in ("main", "master"):
+        if git(cwd, "show-ref", "--verify", "--quiet", f"refs/remotes/origin/{cand}"):
+            return cand
+    return "main"
+
+
+def worktrees(cwd):
+    """Parse `git worktree list --porcelain` into [{"path","branch","head"}]."""
+    rc, out, _ = run(["git", "-C", cwd, "worktree", "list", "--porcelain"])
+    if rc != 0:
+        return []
+    wts, cur = [], {}
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            if cur:
+                wts.append(cur)
+            cur = {"path": line[len("worktree "):]}
+        elif line.startswith("branch "):
+            cur["branch"] = line[len("branch "):].replace("refs/heads/", "")
+        elif line.startswith("HEAD "):
+            cur["head"] = line[len("HEAD "):]
+    if cur:
+        wts.append(cur)
+    return wts
+
+
+def status_counts(path):
+    """(staged, unstaged, untracked) via porcelain -z."""
+    rc, out, _ = run(["git", "-C", path, "status", "--porcelain=v1", "-z"])
+    if rc != 0 or not out:
+        return (0, 0, 0)
+    staged = unstaged = untracked = 0
+    for entry in out.split("\0"):
+        if not entry:
+            continue
+        xy = entry[:2]
+        if xy[0] == "?":
+            untracked += 1
+        else:
+            if xy[0] not in ". ":
+                staged += 1
+            if xy[1] not in ". ":
+                unstaged += 1
+    return (staged, unstaged, untracked)
+
+
+def upstream_map(cwd):
+    """{branch_short: upstream_short} for every local branch, from git itself.
+
+    The docs' --no-track behavior only applies to branches created by
+    cohort-new-worktree; branches may have been created other ways (e.g.
+    agent/cohort-rename above tracks origin/agent/cohort-rename). Resolving
+    this via for-each-ref avoids fragile @{u} syntax that differs across
+    git versions and checkout contexts.
+    """
+    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
+                      "--format=%(refname:short)%09%(upstream:short)", "refs/heads/"])
+    mapping = {}
+    if rc == 0:
+        for line in out.splitlines():
+            if "\t" in line:
+                br, up = line.split("\t", 1)
+                if up:
+                    mapping[br] = up
+    return mapping
+
+
+def count_commits(cwd, *revs):
+    out = git(cwd, "rev-list", "--count", *revs)
+    return int(out) if out.isdigit() else 0
+
+
+def branch_info(cwd, branch):
+    info = {}
+    rc, out, _ = run(["git", "-C", cwd, "log", "-1", "--format=%s%x09%cI", branch])
+    if rc == 0 and out:
+        if "\t" in out:
+            subj, when = out.split("\t", 1)
+            info["subject"] = subj
+            info["last_commit_at"] = when
+    return info
+
+
+def classify(status):
+    return status
+
+
+def orphan_branches(cwd, worktree_map):
+    """Local branches with no worktree and no upstream (or merged ones).
+
+    These are the things Cohort's cleanup is supposed to have removed:
+    branches whose worktree is gone but whose ref lingers, either merged
+    (cleanup candidate) or never-integrated (parked/abandoned work).
+    Tracked branches that still have a remote counterpart are excluded —
+    their remote is the source of truth and they're plenty discoverable.
+    """
+    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
+                      "--format=%(refname:short)\t%(upstream:short)", "refs/heads/"])
+    if rc != 0:
+        return []
+    result = []
+    for line in out.splitlines():
+        if "\t" not in line:
+            continue
+        br, up = line.split("\t", 1)
+        if br in worktree_map or br == "main":
+            continue
+        result.append({"branch": br, "upstream_ref": up})
+    return result
+
+
+def branch_is_merged_into(cwd, branch, base):
+    rc, _, _ = run(["git", "-C", cwd, "merge-base", "--is-ancestor", branch, base])
+    return rc == 0
+
+
+def scan_repo(root):
+    entry = {"root": root}
+    toplevel = git_root_of(root)
+    if not toplevel:
+        entry["error"] = "not a git repository"
+        return entry
+    if not os.path.isdir(toplevel):
+        entry["error"] = "path missing"
+        return entry
+
+    entry["root"] = toplevel
+    entry["name"] = os.path.basename(toplevel)
+    entry["remote"] = git(toplevel, "remote", "get-url", "origin")
+    entry["host"] = host_of_remote(entry["remote"])
+    db = entry["default_branch"] = default_branch(toplevel)
+    ups = upstream_map(toplevel)
+    entry["worktrees"] = []
+    entry["orphans"] = []
+
+    worktree_branches = set()
+    for wt in worktrees(toplevel):
+        branch = wt.get("branch")
+        path = wt.get("path")
+        if not branch or not path:
+            continue
+        worktree_branches.add(branch)
+
+        item = {
+            "path": path,
+            "branch": branch,
+            "is_primary": path == toplevel,
+            "head": wt.get("head", ""),
+            "head_short": (wt.get("head") or "")[:12],
+        }
+        item.update(branch_info(toplevel, branch))
+
+        staged, unstaged, untracked = status_counts(path)
+        item.update(
+            staged=staged, unstaged=unstaged, untracked=untracked,
+            dirty_files=staged + unstaged + untracked,
+        )
+
+        upstream = ups.get(branch, "")
+        item["has_upstream"] = bool(upstream)
+        item["upstream_ref"] = upstream
+        ahead = behind = 0
+        if upstream:
+            out = git(toplevel, "rev-list", "--left-right", "--count", f"{upstream}...{branch}")
+            parts = out.split()
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                ahead, behind = int(parts[0]), int(parts[1])
+        item["ahead"], item["behind"] = ahead, behind
+        item["commits_since_default"] = count_commits(toplevel, f"origin/{db}..{branch}")
+
+        when = item.get("last_commit_at")
+        if when:
+            try:
+                dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+                item["days_since_last_commit"] = round(
+                    (datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
+            except ValueError:
+                item["days_since_last_commit"] = None
+        else:
+            item["days_since_last_commit"] = None
+
+        # Classification: clean | dirty | unpushed | new (no upstream) | idle
+        if item["dirty_files"]:
+            status = "dirty"
+        elif not item["has_upstream"]:
+            status = "new" if item["ahead"] else "noupstream"
+        elif item["ahead"]:
+            status = "unpushed"
+        else:
+            status = "idle"
+        item["status"] = status
+        entry["worktrees"].append(item)
+
+    for ob in orphan_branches(toplevel, worktree_branches):
+        br = ob["branch"]
+        ob["has_upstream"] = bool(ob.get("upstream_ref"))
+        ob["merged"] = branch_is_merged_into(toplevel, br, f"origin/{db}")
+        ob["commits_since_default"] = count_commits(toplevel, f"origin/{db}..{br}")
+        ob.update(branch_info(toplevel, br))
+        when = ob.get("last_commit_at")
+        if when:
+            try:
+                dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+                ob["days_since_last_commit"] = round(
+                    (datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
+            except ValueError:
+                ob["days_since_last_commit"] = None
+        else:
+            ob["days_since_last_commit"] = None
+        if not ob["has_upstream"]:
+            ob["status"] = "merged" if ob["merged"] else "orphan"
+        else:
+            ob["status"] = "merged" if ob["merged"] else "tracked"
+        entry["orphans"].append(ob)
+
+    return entry
+
+
+def main():
+    repos = discover_repos()
+    # De-duplicate by real git root: a worktree and its primary checkout
+    # both belong to one repo, and walking $HOME finds every worktree.
+    seen, unique = set(), []
+    for r in repos:
+        toplevel = git_common_root_of(r) or git_root_of(r)
+        if toplevel and toplevel not in seen:
+            seen.add(toplevel)
+            unique.append(toplevel)
+        elif not toplevel and r not in seen:
+            seen.add(r)
+            unique.append(r)
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "repos": [scan_repo(r) for r in unique],
+    }
+    print(json.dumps(payload, indent=2))
+
+
+if __name__ == "__main__":
+    main()

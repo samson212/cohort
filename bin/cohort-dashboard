@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""cohort-dashboard: serve a Cohort worktree/PR dashboard.
+
+    cohort-dashboard [--port 8000] [--refresh 30]
+
+Collects worktree metadata (git) and PR metadata (gh), then serves a small
+single-page dashboard. No dependencies beyond Python 3 stdlib.
+
+Endpoints:
+    /            the dashboard HTML
+    /api/data    fresh JSON (git+gh, cached for --refresh seconds)
+    /api/data?no_gh=1   git-only JSON (skip gh for speed)
+    /healthz     "ok"
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs
+
+DEFAULT_PORT = 8000
+DEFAULT_REFRESH = 30  # seconds between data refreshes
+
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+PREP = os.path.join(SCRIPT_DIR, "cohort-dashboard-prep")
+PR_SCRIPT = os.path.join(SCRIPT_DIR, "cohort-dashboard-pr")
+
+# ── data collection ──────────────────────────────────────────────────────
+
+class DataCache:
+    """Thin TTL cache around the collect pipeline.
+
+    gh is slow (network); git is fast. The dashboard refreshes often, so
+    cache the combined payload for a few seconds and let 'no_gh' scrape by
+    with just the git half for instant feedback.
+    """
+
+    def __init__(self, ttl=DEFAULT_REFRESH):
+        self.ttl = ttl
+        self._lock = threading.Lock()
+        self._full = None
+        self._full_at = 0.0
+        self._no_gh = None
+        self._no_gh_at = 0.0
+
+    def _collect(self, no_gh):
+        proc = subprocess.run([PREP], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, timeout=120)
+        if proc.returncode != 0:
+            raise RuntimeError(f"prep failed: {proc.stderr[:500]}")
+        data = json.loads(proc.stdout)
+        if not no_gh:
+            proc = subprocess.run([PR_SCRIPT], input=proc.stdout, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, timeout=120)
+            if proc.returncode != 0:
+                # gh failure shouldn't kill the dashboard: fall back to git-only
+                data["pr_error"] = proc.stderr[:300]
+            else:
+                data = json.loads(proc.stdout)
+        data["collected_at"] = datetime.now(timezone.utc).isoformat()
+        return data
+
+    def get(self, no_gh=False):
+        now = time.monotonic()
+        with self._lock:
+            bucket = self._no_gh if no_gh else self._full
+            at = self._no_gh_at if no_gh else self._full_at
+            if bucket is not None and now - at < self.ttl:
+                return bucket
+        data = self._collect(no_gh)
+        with self._lock:
+            if no_gh:
+                self._no_gh, self._no_gh_at = data, now
+            else:
+                self._full, self._full_at = data, now
+        return data
+
+
+_cache = DataCache()
+
+# ── HTML ─────────────────────────────────────────────────────────────────
+
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cohort dashboard</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #171c23; --panel2: #1d242d;
+    --text: #e6e9ee; --muted: #8b949e; --line: #2a323d;
+    --accent: #4f8cff; --green: #3fb950; --yellow: #d29922;
+    --red: #f85149; --purple: #a371f7; --cyan: #39c5cf;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 18px 28px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0;
+    background: rgba(15,20,25,.92); backdrop-filter: blur(6px); z-index: 5;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; align-items: center; }
+  .meta .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 5px; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 22px 28px 60px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 18px 0 26px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card .num { font-size: 26px; font-weight: 700; }
+  .card .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin: 28px 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--panel2); }
+  .branch { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  .subj { color: var(--muted); font-size: 12.5px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
+    border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .3px;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge.green { color: var(--green); border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.08); }
+  .badge.yellow { color: var(--yellow); border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.08); }
+  .badge.red { color: var(--red); border-color: rgba(248,81,73,.4); background: rgba(248,81,73,.08); }
+  .badge.purple { color: var(--purple); border-color: rgba(163,113,247,.4); background: rgba(163,113,247,.08); }
+  .badge.cyan { color: var(--cyan); border-color: rgba(57,197,207,.4); background: rgba(57,197,207,.08); }
+  .badge.gray { color: var(--muted); border-color: var(--line); background: transparent; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11.5px;
+    background: var(--panel2); border: 1px solid var(--line); color: var(--muted); font-family: ui-monospace, monospace;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .prlink { display: inline-flex; align-items: center; gap: 6px; }
+  .prlink .num { font-weight: 650; }
+  .draft-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .empty { color: var(--muted); padding: 18px 0; text-align: center; }
+  .err { color: var(--red); }
+  footer { color: var(--muted); font-size: 11.5px; margin-top: 30px; }
+  @media (max-width: 720px) {
+    .meta { flex-wrap: wrap; }
+    th.dirty-h, td.dirty-c { display: none; }
+    .wrap { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>◧ Cohort dashboard</h1>
+  <span class="sub">worktrees &amp; pull requests</span>
+  <div class="spacer"></div>
+  <div class="meta">
+    <span id="updated"><span class="dot"></span>loading…</span>
+    <span id="repocount"></span>
+  </div>
+</header>
+<div class="wrap">
+  <div id="summary" class="cards"></div>
+  <div id="repo-views"></div>
+  <footer>Auto-refreshes every 30s · data collected from local git + <code>gh</code> · Cohort engine</footer>
+</div>
+<script>
+const fmt = {
+  age(d) {
+    if (d == null) return '—';
+    if (d < 1) return Math.round(d * 24) + 'h';
+    if (d < 30) return d + 'd';
+    return Math.round(d / 30) + 'mo';
+  },
+  time(iso) {
+    if (!iso) return '';
+    const dt = new Date(iso);
+    return dt.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  },
+  esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+};
+
+function statusBadge(wt) {
+  const map = {
+    dirty:   ['red',   '● dirty'],
+    unpushed:['yellow','▲ unpushed'],
+    idle:    ['gray',  '○ idle'],
+    new:     ['purple','✚ new'],
+    noupstream: ['gray', 'no upstream'],
+  };
+  const [cls, txt] = map[wt.status] || ['gray', wt.status];
+  return `<span class="badge ${cls}">${txt}</span>`;
+}
+
+function prBadge(wt) {
+  if (!wt.pr_number) return '<span class="pill gray">no PR</span>';
+  const st = wt.pr_state === 'OPEN' ? 'green' : 'gray';
+  const draft = wt.pr_draft ? ' ✎' : '';
+  return `<a class="prlink" href="${fmt.esc(wt.pr_url)}" target="_blank" rel="noopener">
+    <span class="badge ${st}">#${wt.pr_number}${draft}</span></a>`;
+}
+
+function prRow(pr) {
+  return `<tr><td class="branch">${fmt.esc(pr.headRefName || '')}</td>
+    <td><span class="badge green">#${pr.number} OPEN</span></td>
+    <td><a href="${fmt.esc(pr.url)}" target="_blank" rel="noopener">${fmt.esc(pr.title)}</a>
+      ${pr.isDraft ? '<span class="draft-dot" title="draft"></span>' : ''}</td>
+    <td>+${pr.additions ?? 0}/−${pr.deletions ?? 0}</td>
+    <td>${fmt.esc(pr.mergeable || '')}</td>
+    <td>${fmt.time(pr.createdAt)}</td></tr>`;
+}
+
+function render(data) {
+  const updated = document.getElementById('updated');
+  updated.innerHTML = `<span class="dot"></span>updated ${fmt.time(data.collected_at || data.generated_at)}`;
+
+  let tWork = 0, tDirty = 0, tPRs = 0, tOrphan = 0;
+  for (const repo of data.repos || []) {
+    for (const wt of repo.worktrees || []) { tWork++; if (wt.dirty_files) tDirty++; }
+    tPRs += (repo.open_prs || []).length;
+    tOrphan += (repo.orphans || []).filter(o => o.status === 'merged').length;
+  }
+  const cards = `
+    <div class="card"><div class="num">${tWork}</div><div class="lbl">worktrees</div><div class="sub">${tDirty} dirty</div></div>
+    <div class="card"><div class="num">${tPRs}</div><div class="lbl">open PRs</div><div class="sub">across repos</div></div>
+    <div class="card"><div class="num">${tDirty}</div><div class="lbl">dirty worktrees</div><div class="sub">uncommitted changes</div></div>
+    <div class="card"><div class="num">${tOrphan}</div><div class="lbl">merged orphans</div><div class="sub">branches to clean up</div></div>`;
+  document.getElementById('summary').innerHTML = cards;
+
+  const views = (data.repos || []).map(repo => {
+    const wts = repo.worktrees || [];
+    const orphans = (repo.orphans || []).filter(o => o.status === 'merged' || o.status === 'orphan');
+    const open = repo.open_prs || [];
+    const rows = wts.map(wt => `
+      <tr>
+        <td class="branch">${fmt.esc(wt.branch)}${wt.is_primary ? ' <span class="pill" title="primary checkout">main</span>' : ''}
+          ${wt.is_primary ? '' : `<div class="subj">${fmt.esc(wt.subject || '')}</div>`}</td>
+        <td>${statusBadge(wt)}</td>
+        <td>${wt.dirty_files ? `${wt.staged}+${wt.unstaged}/~${wt.untracked} <span class="pill">${wt.dirty_files} files</span>` : '<span class="pill gray">clean</span>'}</td>
+        <td>${wt.behind ? `<span class="err">▼${wt.behind}</span>` : ''}${wt.ahead ? `<span class="badge yellow">▲${wt.ahead}</span>` : ''} ${wt.commits_since_default ? `<span class="pill">+${wt.commits_since_default}</span>` : ''}</td>
+        <td>${fmt.age(wt.days_since_last_commit)} ago</td>
+        <td>${prBadge(wt)}</td>
+        <td>${fmt.esc(wt.head_short || '')}</td>
+      </tr>`).join('');
+    const orphanRows = orphans.map(o => `
+      <tr>
+        <td class="branch">${fmt.esc(o.branch)}</td>
+        <td><span class="badge purple">${o.status === 'merged' ? 'merged' : 'orphan'}</span></td>
+        <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
+        <td>${fmt.age(o.days_since_last_commit)} ago</td>
+        <td colspan="2">${fmt.esc(o.head_short || o.upstream_ref || '')}</td>
+      </tr>`).join('');
+    const prRows = open.map(prRow).join('');
+    return `
+      <h2>${fmt.esc(repo.name)} <span class="sub">· ${fmt.esc(repo.root)}</span></h2>
+      <table>
+        <thead><tr><th>branch</th><th>state</th><th>changes</th><th>vs origin</th><th>age</th><th>PR</th><th>head</th></tr></thead>
+        <tbody>${rows || '<tr><td class="empty" colspan="7">no worktrees</td></tr>'}</tbody>
+      </table>
+      ${open.length ? `
+        <h2>Open pull requests</h2>
+        <table><thead><tr><th>branch</th><th>state</th><th>title</th><th>diff</th><th>mergeable</th><th>created</th></tr></thead>
+        <tbody>${prRows}</tbody></table>` : ''}
+      ${orphans.length ? `
+        <h2>Branches without worktrees</h2>
+        <table><thead><tr><th>branch</th><th>state</th><th>subject</th><th>age</th><th></th></tr></thead>
+        <tbody>${orphanRows}</tbody></table>` : ''}`;
+  }).join('');
+  document.getElementById('repo-views').innerHTML = views;
+  document.getElementById('repocount').textContent = `${(data.repos || []).length} repo${(data.repos || []).length === 1 ? '' : 's'}`;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/data');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('updated').innerHTML = `<span class="dot" style="background:var(--red)"></span>error: ${fmt.esc(e.message)}`;
+  }
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
+"""
+
+# ── HTTP ─────────────────────────────────────────────────────────────────
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "CohortDashboard/1"
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/healthz":
+            self._send(200, b"ok", "text/plain")
+            return
+        if path == "/api/data":
+            qs = parse_qs(parsed.query)
+            no_gh = "no_gh" in qs
+            try:
+                data = _cache.get(no_gh=no_gh)
+                body = json.dumps(data).encode()
+                self._send(200, body)
+            except Exception as exc:  # noqa: BLE001 — report, don't crash the server
+                self._send(500, json.dumps({"error": str(exc)}).encode())
+            return
+        if path == "/":
+            self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+            return
+        self._send(404, b"not found", "text/plain")
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
+
+
+def main():
+    port = DEFAULT_PORT
+    refresh = DEFAULT_REFRESH
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--port" and i + 1 < len(args):
+            port = int(args[i + 1]); i += 2
+        elif args[i] == "--refresh" and i + 1 < len(args):
+            refresh = int(args[i + 1]); i += 2
+        else:
+            i += 1
+    global _cache
+    _cache = DataCache(ttl=refresh)
+    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    print(f"Cohort dashboard on http://0.0.0.0:{port} (refresh {refresh}s)")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

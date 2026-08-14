@@ -1,0 +1,17 @@
+[Unit]
+Description=Cohort worktree & PR dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=exedev
+Group=exedev
+Environment=HOME=/home/exedev
+Environment=PATH=/home/exedev/.cohort/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/exedev/.cohort/bin/cohort-dashboard --port 8000 --refresh 30
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
