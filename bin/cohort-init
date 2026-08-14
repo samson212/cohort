@@ -132,6 +132,30 @@ if $ENFORCE_GIT; then
     echo "Git enforcement enabled: agents cannot git commit/push/rebase."
     echo "  Remove $ENFORCE_MARKER to disable."
   fi
+
+  # Obscure the system git so agents can't find it: the wrapper is the only
+  # `git` on PATH, and the real binary is moved to a name that signals the
+  # proscription to anything that stumbles on it. Requires root; safe to
+  # re-run (skips if already renamed). /bin/git (a symlink to /usr/bin/git
+  # on Debian) becomes dangling and is removed so nothing points at the
+  # moved binary.
+  if [[ -x /usr/bin/git && ! -e /usr/bin/git.do.not.call ]]; then
+    if [[ -w /usr/bin ]]; then
+      mv /usr/bin/git /usr/bin/git.do.not.call
+    else
+      echo "Need root to obscure git: sudo mv /usr/bin/git /usr/bin/git.do.not.call" >&2
+      exit 1
+    fi
+    # Remove /bin/git symlink if it pointed at the renamed /usr/bin/git
+    # (now dangling). Only touch it if it resolves to the path we moved.
+    if [[ -L /bin/git && "$(readlink /bin/git)" == "/usr/bin/git" ]]; then
+      rm /bin/git
+      echo "Removed dangling /bin/git symlink"
+    fi
+    echo "Obscured git: /usr/bin/git -> /usr/bin/git.do.not.call"
+  elif [[ -e /usr/bin/git.do.not.call ]]; then
+    echo "git already obscured (git.do.not.call present), skipping"
+  fi
 fi
 
 echo ""

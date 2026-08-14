@@ -95,3 +95,22 @@ All projects pick up the update immediately — no per-project migration.
   Enforcement is opt-in: `cohort-init --enforce-git` creates
   `~/.cohort/enforce-git`; remove it to disable. Without the marker,
   the wrapper is a transparent pass-through.
+
+### Enforcing for an entire VM
+
+`~/.cohort/enforce-git` gates agents on the current machine, but an agent can
+remove it — the marker lives in the same account. To make the block
+unavoidable, the flag also **obscures the system git** so the wrapper is the
+only `git` an agent can reach, and the real binary can't be invoked behind
+its back:
+
+- `cohort-init --enforce-git` renames `/usr/bin/git` →
+  `/usr/bin/git.do.not.call` (requires root; safe to re-run).
+- The renamed name is deliberately a proscription: a model exploring the
+  filesystem sees `git.do.not.call` and knows not to call it.
+- `bin/git` prefers `/usr/bin/git.do.not.call` when resolving the real
+  binary and falls back to `/usr/bin/git` / `/bin/git` (self-excluding), so
+  it keeps working whether or not the rename was done.
+
+On a machine where you *don't* want git obscured, don't pass the flag — the
+canonical executable stays untouched and the wrapper is a no-op.

@@ -1,18 +1,36 @@
 #!/bin/bash
 # git wrapper — transparent pass-through until enforcement is opted in.
-# Create ~/.cohort/enforce-git (via `cohort-init --enforce-git`) to activate.
+# `cohort-init --enforce-git` creates ~/.cohort/enforce-git AND obscures the
+# real git as /usr/bin/git.do.not.call, leaving this wrapper as the only git
+# on PATH. The renamed name is a deliberate proscription: a model exploring
+# the filesystem sees git.do.not.call and knows not to call it.
 #
-# Resolves the real git: prefers /usr/bin/git.do.not.call (VM-level rename),
-# falls back to well-known paths skipping this wrapper.
+# Resolves the real git: prefers /usr/bin/git.do.not.call (the obscured
+# binary), falls back to well-known paths, excluding this wrapper itself
+# (self-shadow guard).
+
+SELF=$(readlink -f "$0")
 
 REAL_GIT=/usr/bin/git.do.not.call
 if [[ ! -x "$REAL_GIT" ]]; then
+  REAL_GIT=""
   for candidate in /usr/bin/git /bin/git; do
-    if [[ -x "$candidate" && "$(readlink -f "$candidate")" != "$(readlink -f "$0")" ]]; then
+    if [[ -x "$candidate" && "$(readlink -f "$candidate")" != "$SELF" ]]; then
       REAL_GIT="$candidate"
       break
     fi
   done
+  if [[ -z "$REAL_GIT" ]]; then
+    REAL_GIT=$(command -v git 2>/dev/null || true)
+    if [[ -n "$REAL_GIT" && "$(readlink -f "$REAL_GIT")" == "$SELF" ]]; then
+      REAL_GIT=""
+    fi
+  fi
+fi
+
+if [[ -z "$REAL_GIT" ]]; then
+  echo "ERROR: cannot locate the real git binary (wrapper at $SELF)." >&2
+  exit 1
 fi
 
 ENFORCE_FILE="$HOME/.cohort/enforce-git"
