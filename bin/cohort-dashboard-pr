@@ -38,7 +38,12 @@ def gh(cwd, *args):
 
 
 def collect_prs(repo):
-    """Return {branch: {…pr fields…}, '__open__': [pr, …]} for one repo."""
+    """Return {branch: {…pr fields…}, '__open__': [pr, …], '__web__': url} for one repo.
+
+    Also resolves the canonical (public) web URL for the repo — gh knows the
+    real GitHub domain, whereas the git remote may point at an internal
+    mirror the browser/client can't reach.
+    """
     env_guard = os.environ.get("COHORT_NO_GH")
     if env_guard:
         return {}
@@ -48,8 +53,17 @@ def collect_prs(repo):
         return {}
 
     result = {}
-    # All PRs (open + merged + closed) for the head branches we know about.
-    # gh pr list --state all + filtering locally keeps it to one call.
+    # Canonical web URL first: gh returns the public github.com address even
+    # when the origin remote uses an internal mirror host.
+    rc, out, _ = gh(root, "repo", "view", "--json", "url")
+    if rc == 0 and out:
+        try:
+            url = json.loads(out).get("url", "")
+            if url:
+                result["__web__"] = url.rstrip("/")
+        except json.JSONDecodeError:
+            pass
+
     rc, out, err = gh(root, "pr", "list", "--state", "all", "--limit", "100", "--json",
                       "number,title,state,url,isDraft,headRefName,baseRefName,createdAt,updatedAt,reviewDecision,mergeable,additions,deletions,headRefOid")
     if rc != 0 or not out:
@@ -92,6 +106,12 @@ def main():
     payload = json.load(sys.stdin)
     for repo in payload.get("repos", []):
         prs = collect_prs(repo)
+        # Canonical public web URL from gh (see collect_prs): the browser
+        # links must point at the real GitHub domain, not an internal
+        # mirror host derived from the git remote.
+        web = prs.get("__web__")
+        if web:
+            repo["web"] = web
         for group in (repo.get("worktrees", []),
                       repo.get("orphans", []),
                       repo.get("remote_only", [])):

@@ -194,7 +194,8 @@ const fmt = {
   }
 };
 
-// GitHub web links — every repo gets an origin-derived base URL in prep (repo.web).
+// GitHub web links — repo.web is the canonical public URL, resolved by gh
+// (repo view url) and falling back to the origin-derived base when gh is off.
 // Paths are URL-encoded so branch names like "feature/foo" stay valid.
 function treeUrl(repo, branch) { return repo.web ? `${repo.web}/tree/${encodeURIComponent(branch)}` : ''; }
 function commitUrl(repo, sha)   { return repo.web ? `${repo.web}/commit/${encodeURIComponent(sha)}` : ''; }
