@@ -1,33 +1,46 @@
 #!/bin/bash
-# git wrapper — block forbidden subcommands for non-interactive callers.
-# Shadows /usr/bin/git via PATH ordering (~/.cohort/bin comes first).
-# A TTY stdin means a human is typing; pass through.
+# git wrapper — transparent pass-through until enforcement is opted in.
+# Create ~/.cohort/enforce-git (via `cohort-init --enforce-git`) to activate.
+#
+# Resolves the real git: prefers /usr/bin/git.do.not.call (VM-level rename),
+# falls back to well-known paths skipping this wrapper.
 
-REAL_GIT=/usr/bin/git
+REAL_GIT=/usr/bin/git.do.not.call
+if [[ ! -x "$REAL_GIT" ]]; then
+  for candidate in /usr/bin/git /bin/git; do
+    if [[ -x "$candidate" && "$(readlink -f "$candidate")" != "$(readlink -f "$0")" ]]; then
+      REAL_GIT="$candidate"
+      break
+    fi
+  done
+fi
 
-case "$1" in
-  commit)
-    if [[ -t 0 ]]; then
-      exec "$REAL_GIT" "$@"
-    fi
-    echo "BLOCKED: git commit is forbidden for agents. Use /cohort-commit instead." >&2
-    exit 1
-    ;;
-  push)
-    if [[ -t 0 ]]; then
-      exec "$REAL_GIT" "$@"
-    fi
-    echo "BLOCKED: git push is forbidden for agents. Use /cohort-push instead." >&2
-    exit 1
-    ;;
-  rebase)
-    if [[ -t 0 ]]; then
-      exec "$REAL_GIT" "$@"
-    fi
-    echo "BLOCKED: git rebase is forbidden. Amend local-only commits, revert pushed commits. Never rebase pushed history." >&2
-    exit 1
-    ;;
-  *)
-    exec "$REAL_GIT" "$@"
-    ;;
-esac
+ENFORCE_FILE="$HOME/.cohort/enforce-git"
+
+if [[ -f "$ENFORCE_FILE" ]]; then
+  case "$1" in
+    commit)
+      if [[ -t 0 ]]; then
+        exec "$REAL_GIT" "$@"
+      fi
+      echo "BLOCKED: git commit is forbidden for agents. Use /cohort-commit instead." >&2
+      exit 1
+      ;;
+    push)
+      if [[ -t 0 ]]; then
+        exec "$REAL_GIT" "$@"
+      fi
+      echo "BLOCKED: git push is forbidden for agents. Use /cohort-push instead." >&2
+      exit 1
+      ;;
+    rebase)
+      if [[ -t 0 ]]; then
+        exec "$REAL_GIT" "$@"
+      fi
+      echo "BLOCKED: git rebase is forbidden. Amend local-only commits, revert pushed commits. Never rebase pushed history." >&2
+      exit 1
+      ;;
+  esac
+fi
+
+exec "$REAL_GIT" "$@"

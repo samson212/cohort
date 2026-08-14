@@ -91,6 +91,7 @@ All projects pick up the update immediately — no per-project migration.
 - **Project prompt.md is the tail position** — it loads last, so it can
   override or augment anything in the universal set.
 - **`bin/git` shadows `/usr/bin/git`** — blocks `git commit`, `git push`,
-  and `git rebase` for non-TTY callers (agents, scripts, CI). Humans using
-  a terminal pass through transparently. This enforces the hard rules at
-  the process level, not just in prompts.
+  and `git rebase` for non-TTY callers when enforce-git is enabled.
+  Enforcement is opt-in: `cohort-init --enforce-git` creates
+  `~/.cohort/enforce-git`; remove it to disable. Without the marker,
+  the wrapper is a transparent pass-through.

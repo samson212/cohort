@@ -6,14 +6,24 @@
 # A symlink ~/.cohort -> ~/cohort is the recommended convention so
 # tooling finds it at a predictable path while keeping the repo visible.
 #
-# Usage: ~/.cohort/bin/cohort-init [project-name]
+# Usage: ~/.cohort/bin/cohort-init [--enforce-git] [project-name]
 #   project-name defaults to the current directory's basename.
+#   --enforce-git  creates ~/.cohort/enforce-git to block git commit/push/rebase for agents
 set -e
+
+ENFORCE_GIT=false
+PROJECT_NAME=""
+for arg in "$@"; do
+  case "$arg" in
+    --enforce-git) ENFORCE_GIT=true ;;
+    *) PROJECT_NAME="$arg" ;;
+  esac
+done
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ENGINE_ROOT=$(dirname "$SCRIPT_DIR")
 PROJECT_ROOT="$PWD"
-PROJECT_NAME="${1:-$(basename "$PROJECT_ROOT")}"
+PROJECT_NAME="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "Error: not inside a git repository. Run this from a project root." >&2
@@ -99,6 +109,18 @@ for hook_dst in "$SLASH_DST_DIR"/cohort-*; do
         echo "Removed stale slash hook: $hook_dst"
     fi
 done
+
+# 4. Git enforcement (opt-in)
+if $ENFORCE_GIT; then
+  ENFORCE_MARKER="$HOME/.cohort/enforce-git"
+  if [[ -f "$ENFORCE_MARKER" ]]; then
+    echo "Git enforcement already enabled: $ENFORCE_MARKER"
+  else
+    touch "$ENFORCE_MARKER"
+    echo "Git enforcement enabled: agents cannot git commit/push/rebase."
+    echo "  Remove $ENFORCE_MARKER to disable."
+  fi
+fi
 
 echo ""
 echo "Done. Open Shelley in $PROJECT_ROOT to use Cohort."
