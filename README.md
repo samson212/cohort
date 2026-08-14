@@ -32,6 +32,7 @@ cohort-init
 - [Git workflow](docs/git-workflow.md) — worktrees, branches, commits
 - [Agent roles](docs/agent-roles.md) — the agent catalog and how prompts compose
 - [Agent commands](docs/agent-commands.md) — slash command reference
+- [Dashboard design](docs/dashboard-design.md) — worktree/PR dashboard architecture
 - [Code review guidelines](docs/code-review-guidelines.md)
 
 ## Update
