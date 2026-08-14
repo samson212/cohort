@@ -90,3 +90,7 @@ All projects pick up the update immediately — no per-project migration.
   particular task runner.
 - **Project prompt.md is the tail position** — it loads last, so it can
   override or augment anything in the universal set.
+- **`bin/git` shadows `/usr/bin/git`** — blocks `git commit`, `git push`,
+  and `git rebase` for non-TTY callers (agents, scripts, CI). Humans using
+  a terminal pass through transparently. This enforces the hard rules at
+  the process level, not just in prompts.

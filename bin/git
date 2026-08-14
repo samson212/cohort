@@ -1,0 +1,33 @@
+#!/bin/bash
+# git wrapper — block forbidden subcommands for non-interactive callers.
+# Shadows /usr/bin/git via PATH ordering (~/.cohort/bin comes first).
+# A TTY stdin means a human is typing; pass through.
+
+REAL_GIT=/usr/bin/git
+
+case "$1" in
+  commit)
+    if [[ -t 0 ]]; then
+      exec "$REAL_GIT" "$@"
+    fi
+    echo "BLOCKED: git commit is forbidden for agents. Use /cohort-commit instead." >&2
+    exit 1
+    ;;
+  push)
+    if [[ -t 0 ]]; then
+      exec "$REAL_GIT" "$@"
+    fi
+    echo "BLOCKED: git push is forbidden for agents. Use /cohort-push instead." >&2
+    exit 1
+    ;;
+  rebase)
+    if [[ -t 0 ]]; then
+      exec "$REAL_GIT" "$@"
+    fi
+    echo "BLOCKED: git rebase is forbidden. Amend local-only commits, revert pushed commits. Never rebase pushed history." >&2
+    exit 1
+    ;;
+  *)
+    exec "$REAL_GIT" "$@"
+    ;;
+esac
