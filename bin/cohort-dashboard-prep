@@ -40,6 +40,7 @@ server half's job (network calls are slow and can fail; git reads aren't).
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -158,6 +159,26 @@ def host_of_remote(url):
     return host
 
 
+def web_url_of_remote(url):
+    """Base web URL (https) for a git remote, or "" if it's not https-able.
+
+    Handles the forms git uses on this VM:
+      https://host/owner/repo.git       -> https://host/owner/repo
+      ssh://git@host/owner/repo.git     -> https://host/owner/repo
+      git@host:owner/repo.git           -> https://host/owner/repo
+    A host that isn't a well-formed FQDN (e.g. a path) gets "".
+    """
+    if not url:
+        return ""
+    m = re.match(r"^(?:git@|https?://|ssh://)(?:[^@/]+@)?([^:/]+)[:/](.+?)(?:\.git)?$", url)
+    if not m:
+        return ""
+    host, path = m.groups()
+    if "." not in host and host != "localhost":
+        return ""
+    return f"https://{host}/{path.strip('/')}"
+
+
 def default_branch(cwd):
     out = git(cwd, "symbolic-ref", "refs/remotes/origin/HEAD")
     if out:
@@ -259,23 +280,77 @@ def orphan_branches(cwd, worktree_map):
     their remote is the source of truth and they're plenty discoverable.
     """
     rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
-                      "--format=%(refname:short)\t%(upstream:short)", "refs/heads/"])
+                      "--format=%(refname:short)\t%(upstream:short)\t%(objectname)", "refs/heads/"])
     if rc != 0:
         return []
     result = []
     for line in out.splitlines():
-        if "\t" not in line:
+        parts = line.split("\t")
+        if len(parts) < 3:
             continue
-        br, up = line.split("\t", 1)
+        br, up, oid = parts[0], parts[1], parts[2]
         if br in worktree_map or br == "main":
             continue
-        result.append({"branch": br, "upstream_ref": up})
+        result.append({"branch": br, "upstream_ref": up,
+                       "head": oid, "head_short": oid[:12]})
     return result
 
 
 def branch_is_merged_into(cwd, branch, base):
     rc, _, _ = run(["git", "-C", cwd, "merge-base", "--is-ancestor", branch, base])
     return rc == 0
+
+
+def remote_only_branches(cwd, default):
+    """Remote-tracking branches with no local branch and no worktree.
+
+    These are merged PR heads whose local branch was cleaned up after merge
+    (or pre-existing remote branches nobody has checked out). They never
+    show up in `git worktree list`, so they need their own list — otherwise
+    they're invisible: no local branch, no worktree, just a ref on origin.
+    """
+    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
+                      "--format=%(refname)\t%(refname:short)\t%(objectname)\t%(symref)",
+                      "refs/remotes/origin/"])
+    result = []
+    if rc != 0:
+        return result
+    # Local branch names (worktree + orphan alike) — remote-only means none
+    # of these exist locally.
+    lrc, lout, _ = run(["git", "-C", cwd, "for-each-ref",
+                        "--format=%(refname:short)", "refs/heads/"])
+    local = set(lout.splitlines()) if lrc == 0 else set()
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        full, ref, oid, sym = parts
+        # refs/remotes/origin itself is a prefix marker/symref, not a branch
+        if full.rstrip("/") == "refs/remotes/origin":
+            continue
+        if sym:  # symbolic refs (origin/HEAD) aren't branches
+            continue
+        br = ref.removeprefix("origin/")
+        if br == "HEAD" or br == default or br.startswith("pr/"):
+            continue
+        if br in local:
+            continue
+        item = {"branch": br, "head": oid, "head_short": oid[:12]}
+        item["merged"] = branch_is_merged_into(cwd, f"origin/{br}", f"origin/{default}")
+        item["commits_since_default"] = count_commits(cwd, f"origin/{default}..origin/{br}")
+        item.update(branch_info(cwd, f"origin/{br}"))
+        when = item.get("last_commit_at")
+        if when:
+            try:
+                dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+                item["days_since_last_commit"] = round(
+                    (datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
+            except ValueError:
+                item["days_since_last_commit"] = None
+        else:
+            item["days_since_last_commit"] = None
+        result.append(item)
+    return result
 
 
 def scan_repo(root):
@@ -292,10 +367,12 @@ def scan_repo(root):
     entry["name"] = os.path.basename(toplevel)
     entry["remote"] = git(toplevel, "remote", "get-url", "origin")
     entry["host"] = host_of_remote(entry["remote"])
+    entry["web"] = web_url_of_remote(entry["remote"])
     db = entry["default_branch"] = default_branch(toplevel)
     ups = upstream_map(toplevel)
     entry["worktrees"] = []
     entry["orphans"] = []
+    entry["remote_only"] = remote_only_branches(toplevel, db)
 
     worktree_branches = set()
     for wt in worktrees(toplevel):

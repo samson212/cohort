@@ -194,7 +194,36 @@ const fmt = {
   }
 };
 
-function statusBadge(wt) {
+// GitHub web links — every repo gets an origin-derived base URL in prep (repo.web).
+// Paths are URL-encoded so branch names like "feature/foo" stay valid.
+function treeUrl(repo, branch) { return repo.web ? `${repo.web}/tree/${encodeURIComponent(branch)}` : ''; }
+function commitUrl(repo, sha)   { return repo.web ? `${repo.web}/commit/${encodeURIComponent(sha)}` : ''; }
+function compareUrl(repo, base, head) {
+  return repo.web ? `${repo.web}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}` : '';
+}
+// gh returns PR URLs on the canonical github.com host even when we're on an
+// int mirror; the page only reaches the right UI if the host matches the
+// repo's origin, so re-home any URL that has a different host.
+function prUrl(repo, raw) {
+  if (!raw || !repo.web) return '';
+  try {
+    const u = new URL(raw);
+    const w = new URL(repo.web);
+    if (u.host !== w.host) u.host = w.host;
+    return u.toString();
+  } catch { return raw; }
+}
+
+function branchCell(repo, name, opts = {}) {
+  const url = opts.url || treeUrl(repo, name);
+  const inner = fmt.esc(name);
+  const suffix = opts.suffix ? ` ${opts.suffix}` : '';
+  const sub = opts.sub ? `<div class="subj">${opts.sub}</div>` : '';
+  const href = url ? ` href="${url}" target="_blank" rel="noopener"` : '';
+  return `<td class="branch"><a${href}>${inner}</a>${suffix}${sub}</td>`;
+}
+
+function statusBadge(wt, repo) {
   const map = {
     dirty:   ['red',   '● dirty'],
     unpushed:['yellow','▲ unpushed'],
@@ -203,21 +232,37 @@ function statusBadge(wt) {
     noupstream: ['gray', 'no upstream'],
   };
   const [cls, txt] = map[wt.status] || ['gray', wt.status];
-  return `<span class="badge ${cls}">${txt}</span>`;
+  // Make the pill itself link to the GitHub page that explains it:
+  //   dirty/unpushed/new -> compare default...branch (what's ahead)
+  //   idle -> the tree (nothing to compare)
+  //   noupstream -> tree too (no PR link)
+  let href = '';
+  if (repo && repo.web) {
+    if (wt.pr_number) href = prUrl(repo, wt.pr_url);
+    else if (wt.status === 'unpushed' || wt.status === 'dirty' || wt.status === 'new')
+      href = compareUrl(repo, repo.default_branch, wt.branch);
+    else href = treeUrl(repo, wt.branch);
+  }
+  const span = `<span class="badge ${cls}">${txt}</span>`;
+  return href ? `<a href="${href}" target="_blank" rel="noopener">${span}</a>` : span;
 }
 
-function prBadge(wt) {
+function prBadge(wt, repo) {
   if (!wt.pr_number) return '<span class="pill gray">no PR</span>';
   const st = wt.pr_state === 'OPEN' ? 'green' : 'gray';
   const draft = wt.pr_draft ? ' ✎' : '';
-  return `<a class="prlink" href="${fmt.esc(wt.pr_url)}" target="_blank" rel="noopener">
+  const href = prUrl(repo, wt.pr_url) || fmt.esc(wt.pr_url || '#');
+  return `<a class="prlink" href="${href}" target="_blank" rel="noopener">
     <span class="badge ${st}">#${wt.pr_number}${draft}</span></a>`;
 }
 
-function prRow(pr) {
-  return `<tr><td class="branch">${fmt.esc(pr.headRefName || '')}</td>
+function prRow(pr, repo) {
+  const head = pr.headRefName || '';
+  const headCell = repo ? branchCell(repo, head) : `<td class="branch">${fmt.esc(head)}</td>`;
+  const href = prUrl(repo, pr.url) || fmt.esc(pr.url || '#');
+  return `<tr>${headCell}
     <td><span class="badge green">#${pr.number} OPEN</span></td>
-    <td><a href="${fmt.esc(pr.url)}" target="_blank" rel="noopener">${fmt.esc(pr.title)}</a>
+    <td><a href="${href}" target="_blank" rel="noopener">${fmt.esc(pr.title)}</a>
       ${pr.isDraft ? '<span class="draft-dot" title="draft"></span>' : ''}</td>
     <td>+${pr.additions ?? 0}/−${pr.deletions ?? 0}</td>
     <td>${fmt.esc(pr.mergeable || '')}</td>
@@ -246,24 +291,35 @@ function render(data) {
     const open = repo.open_prs || [];
     const rows = wts.map(wt => `
       <tr>
-        <td class="branch">${fmt.esc(wt.branch)}${wt.is_primary ? ' <span class="pill" title="primary checkout">main</span>' : ''}
-          ${wt.is_primary ? '' : `<div class="subj">${fmt.esc(wt.subject || '')}</div>`}</td>
-        <td>${statusBadge(wt)}</td>
+        ${branchCell(repo, wt.branch, {
+          sub: wt.subject && !wt.is_primary ? fmt.esc(wt.subject) : '',
+          suffix: wt.is_primary ? '<span class="pill" title="primary checkout">main</span>' : ''
+        })}
+        <td>${statusBadge(wt, repo)}</td>
         <td>${wt.dirty_files ? `${wt.staged}+${wt.unstaged}/~${wt.untracked} <span class="pill">${wt.dirty_files} files</span>` : '<span class="pill gray">clean</span>'}</td>
-        <td>${wt.behind ? `<span class="err">▼${wt.behind}</span>` : ''}${wt.ahead ? `<span class="badge yellow">▲${wt.ahead}</span>` : ''} ${wt.commits_since_default ? `<span class="pill">+${wt.commits_since_default}</span>` : ''}</td>
+        <td>${wt.behind ? `<span class="err">▼${wt.behind}</span>` : ''}${wt.ahead ? `<a href="${compareUrl(repo, repo.default_branch, wt.branch)}" target="_blank" rel="noopener"><span class="badge yellow">▲${wt.ahead}</span></a>` : ''} ${wt.commits_since_default ? `<span class="pill">+${wt.commits_since_default}</span>` : ''}</td>
         <td>${fmt.age(wt.days_since_last_commit)} ago</td>
-        <td>${prBadge(wt)}</td>
-        <td>${fmt.esc(wt.head_short || '')}</td>
+        <td>${prBadge(wt, repo)}</td>
+        <td>${wt.head_short ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : ''}</td>
       </tr>`).join('');
     const orphanRows = orphans.map(o => `
       <tr>
-        <td class="branch">${fmt.esc(o.branch)}</td>
-        <td><span class="badge purple">${o.status === 'merged' ? 'merged' : 'orphan'}</span></td>
+        ${branchCell(repo, o.branch)}
+        <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.status === 'merged' ? 'merged' : 'orphan'}</span>`}</td>
         <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
         <td>${fmt.age(o.days_since_last_commit)} ago</td>
-        <td colspan="2">${fmt.esc(o.head_short || o.upstream_ref || '')}</td>
+        <td colspan="2">${o.head_short ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : fmt.esc(o.upstream_ref || '')}</td>
       </tr>`).join('');
-    const prRows = open.map(prRow).join('');
+    const remoteRows = (repo.remote_only || []).map(o => `
+      <tr>
+        ${branchCell(repo, o.branch)}
+        <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.merged ? 'merged' : 'remote'}</span>`}</td>
+        <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
+        <td>${fmt.age(o.days_since_last_commit)} ago</td>
+        <td colspan="2">${o.head_short ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : ''}</td>
+      </tr>`).join('');
+    const prRows = open.map(pr => prRow(pr, repo)).join('');
+    const remoteOnly = repo.remote_only || [];
     return `
       <h2>${fmt.esc(repo.name)} <span class="sub">· ${fmt.esc(repo.root)}</span></h2>
       <table>
@@ -274,6 +330,10 @@ function render(data) {
         <h2>Open pull requests</h2>
         <table><thead><tr><th>branch</th><th>state</th><th>title</th><th>diff</th><th>mergeable</th><th>created</th></tr></thead>
         <tbody>${prRows}</tbody></table>` : ''}
+      ${remoteOnly.length ? `
+        <h2>Remote branches without local worktrees</h2>
+        <table><thead><tr><th>branch</th><th>state</th><th>subject</th><th>age</th><th></th></tr></thead>
+        <tbody>${remoteRows}</tbody></table>` : ''}
       ${orphans.length ? `
         <h2>Branches without worktrees</h2>
         <table><thead><tr><th>branch</th><th>state</th><th>subject</th><th>age</th><th></th></tr></thead>

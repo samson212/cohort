@@ -70,27 +70,35 @@ def collect_prs(repo):
     return result
 
 
+def enrich(entry, pr):
+    """Attach pr_* fields to a worktree/orphan/remote-only entry."""
+    head = pr.get("headRefOid") or ""
+    entry["pr_number"] = pr.get("number")
+    entry["pr_state"] = pr.get("state")
+    entry["pr_title"] = pr.get("title")
+    entry["pr_url"] = pr.get("url")
+    entry["pr_draft"] = pr.get("isDraft")
+    entry["pr_created_at"] = pr.get("createdAt")
+    entry["pr_updated_at"] = pr.get("updatedAt")
+    entry["pr_review_decision"] = pr.get("reviewDecision") or ""
+    entry["pr_mergeable"] = pr.get("mergeable") or ""
+    entry["pr_additions"] = pr.get("additions", 0)
+    entry["pr_deletions"] = pr.get("deletions", 0)
+    entry["pr_head_sha"] = head[:12]
+    entry["pr_head_sha_matches"] = bool(head) and entry.get("head_short") == head[:12]
+
+
 def main():
     payload = json.load(sys.stdin)
     for repo in payload.get("repos", []):
         prs = collect_prs(repo)
-        for wt in repo.get("worktrees", []):
-            pr = prs.get(wt.get("branch", ""))
-            if pr:
-                head = pr.get("headRefOid") or ""
-                wt["pr_number"] = pr.get("number")
-                wt["pr_state"] = pr.get("state")
-                wt["pr_title"] = pr.get("title")
-                wt["pr_url"] = pr.get("url")
-                wt["pr_draft"] = pr.get("isDraft")
-                wt["pr_created_at"] = pr.get("createdAt")
-                wt["pr_updated_at"] = pr.get("updatedAt")
-                wt["pr_review_decision"] = pr.get("reviewDecision") or ""
-                wt["pr_mergeable"] = pr.get("mergeable") or ""
-                wt["pr_additions"] = pr.get("additions", 0)
-                wt["pr_deletions"] = pr.get("deletions", 0)
-                wt["pr_head_sha"] = head[:12]
-                wt["pr_head_sha_matches"] = bool(head) and wt.get("head_short") == head[:12]
+        for group in (repo.get("worktrees", []),
+                      repo.get("orphans", []),
+                      repo.get("remote_only", [])):
+            for entry in group:
+                pr = prs.get(entry.get("branch", ""))
+                if pr:
+                    enrich(entry, pr)
         repo["open_prs"] = prs.get("__open__", [])
     payload["pr_enriched"] = True
     print(json.dumps(payload))
