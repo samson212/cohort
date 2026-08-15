@@ -21,6 +21,20 @@ git fetch origin
 echo "Fast-forwarding to origin/main..."
 if git merge --ff-only origin/main; then
     echo "Updated: $(git log -1 --oneline)"
+
+    # Re-deploy the git wrapper if enforce-git is active (the engine
+    # update may have changed bin/git, and ~/.cohort/bin/git is a copy,
+    # not a symlink — it must be refreshed).
+    ENFORCE_MARKER="$HOME/.cohort/enforce-git"
+    if [[ -f "$ENFORCE_MARKER" ]]; then
+        WRAPPER_SRC="$ENGINE_DIR/bin/git"
+        WRAPPER_DST="$HOME/.cohort/bin/git"
+        if [[ -f "$WRAPPER_SRC" ]]; then
+            cp "$WRAPPER_SRC" "$WRAPPER_DST"
+            chmod +x "$WRAPPER_DST"
+            echo "Re-deployed git wrapper: $WRAPPER_DST"
+        fi
+    fi
 else
     echo "Cannot fast-forward — local main has diverged from origin/main." >&2
     echo "This shouldn't happen if development is done in worktrees." >&2

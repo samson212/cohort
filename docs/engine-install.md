@@ -92,9 +92,10 @@ All projects pick up the update immediately — no per-project migration.
   override or augment anything in the universal set.
 - **`bin/git` shadows `/usr/bin/git`** — blocks `git commit`, `git push`,
   and `git rebase` for non-TTY callers when enforce-git is enabled.
-  Enforcement is opt-in: `cohort-init --enforce-git` creates
-  `~/.cohort/enforce-git`; remove it to disable. Without the marker,
-  the wrapper is a transparent pass-through.
+  Sanctioned `/cohort-*` commands call `/usr/bin/git.do.not.call` directly
+  — the obscured binary at a known path. Enforcement is opt-in:
+  `cohort-init --enforce-git` creates `~/.cohort/enforce-git`; remove it
+  to disable. Without the marker, the wrapper is a transparent pass-through.
 
 ### Enforcing for an entire VM
 
@@ -104,8 +105,11 @@ unavoidable, the flag also **obscures the system git** so the wrapper is the
 only `git` an agent can reach, and the real binary can't be invoked behind
 its back:
 
-- `cohort-init --enforce-git` renames `/usr/bin/git` →
-  `/usr/bin/git.do.not.call` (requires root; safe to re-run).
+- `cohort-init --enforce-git` deploys `bin/git` to `~/.cohort/bin/git`,
+  obscures `/usr/bin/git` → `/usr/bin/git.do.not.call` (requires root;
+  safe to re-run), and creates `~/.cohort/enforce-git` as the gating marker.
+  `/cohort-*` commands call `/usr/bin/git.do.not.call` directly — no
+  extra binary needed.
 - The renamed name is deliberately a proscription: a model exploring the
   filesystem sees `git.do.not.call` and knows not to call it.
 - `bin/git` prefers `/usr/bin/git.do.not.call` when resolving the real

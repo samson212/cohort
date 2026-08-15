@@ -36,29 +36,30 @@ fi
 ENFORCE_FILE="$HOME/.cohort/enforce-git"
 
 if [[ -f "$ENFORCE_FILE" ]]; then
-  case "$1" in
-    commit)
-      if [[ -t 0 ]]; then
+  # Walk all args for the blocked subcommand — flags like -C, -c, --git-dir
+  # can appear before it, so $1 alone is not enough.
+  skip_next=false
+  for arg in "$@"; do
+    if $skip_next; then
+      skip_next=false
+      continue
+    fi
+    case "$arg" in
+      -C|-c) skip_next=true ;;
+      -*)     ;;  # skip other flags
+      commit|push|rebase)
+        if [[ ! -t 0 ]]; then
+          case "$arg" in
+            commit) echo "BLOCKED: git commit is forbidden for agents. Use /cohort-commit instead." >&2 ;;
+            push)   echo "BLOCKED: git push is forbidden for agents. Use /cohort-push instead." >&2 ;;
+            rebase) echo "BLOCKED: git rebase is forbidden. Amend local-only commits, revert pushed commits. Never rebase pushed history." >&2 ;;
+          esac
+          exit 1
+        fi
         exec "$REAL_GIT" "$@"
-      fi
-      echo "BLOCKED: git commit is forbidden for agents. Use /cohort-commit instead." >&2
-      exit 1
-      ;;
-    push)
-      if [[ -t 0 ]]; then
-        exec "$REAL_GIT" "$@"
-      fi
-      echo "BLOCKED: git push is forbidden for agents. Use /cohort-push instead." >&2
-      exit 1
-      ;;
-    rebase)
-      if [[ -t 0 ]]; then
-        exec "$REAL_GIT" "$@"
-      fi
-      echo "BLOCKED: git rebase is forbidden. Amend local-only commits, revert pushed commits. Never rebase pushed history." >&2
-      exit 1
-      ;;
-  esac
+        ;;
+    esac
+  done
 fi
 
 exec "$REAL_GIT" "$@"

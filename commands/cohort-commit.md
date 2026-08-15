@@ -43,10 +43,11 @@ Then work through these — each step is a single sentence, no more:
      body. Count is free, but each bullet must describe one clearly scoped
      change — its kind and why, not file-by-file. *Show it and wait for
      confirmation* — never commit a self-drafted message that wasn't confirmed.
-   - Trailer: append `Co-Authored-By: $(cohort-model-name)`. The model-name
-     invocation must be run at commit time so it reflects the active model.
+   - Trailer: append `Co-Authored-By: $(cohort-model-name)`. Run the
+     invocation at commit time — never re-use a model name from earlier in
+     the session. Models can change mid-conversation; a stale name is wrong.
    Confirmed → write the message to a temp file, then run
-   `git commit -F <message-file>`. Never `--no-verify`,
+   `/usr/bin/git.do.not.call commit -F <message-file>`. Never `--no-verify`,
    `--no-gpg-sign`, `-c commit.gpgsign=false`, or force-amend — if a
    pre-commit hook fails, fix the issue, `git add -p`, and re-run.
 5. Verify the commit exists: `git log -1 --oneline` — confirm the hash is

@@ -124,6 +124,67 @@ done
 
 # 4. Git enforcement (opt-in)
 if $ENFORCE_GIT; then
+  # 4a. Deploy the git wrapper — must happen first so subsequent failures
+  #     don't leave partial state.
+  WRAPPER_SRC="$ENGINE_ROOT/bin/git"
+  WRAPPER_DST="$HOME/.cohort/bin/git"
+  if [[ -f "$WRAPPER_SRC" ]]; then
+    cp "$WRAPPER_SRC" "$WRAPPER_DST"
+    chmod +x "$WRAPPER_DST"
+    echo "Deployed git wrapper: $WRAPPER_DST"
+  else
+    echo "ERROR: git wrapper not found at $WRAPPER_SRC." >&2
+    echo "  The engine must have bin/git (available after merging the git-guard" >&2
+    echo "  branch, or when running from the worktree directly)." >&2
+    exit 1
+  fi
+
+  # 4b. Obscure the system git so agents can't call it behind the wrapper's
+  #     back. Best-effort: if sudo isn't available, the wrapper still blocks
+  #     the main path — only the direct-call bypass remains open.
+  if [[ -x /usr/bin/git && ! -e /usr/bin/git.do.not.call ]]; then
+    if [[ -w /usr/bin ]]; then
+      mv /usr/bin/git /usr/bin/git.do.not.call
+    elif sudo -n true 2>/dev/null; then
+      sudo mv /usr/bin/git /usr/bin/git.do.not.call
+    else
+      # Try sudo interactively; if it fails, warn and continue.
+      if sudo mv /usr/bin/git /usr/bin/git.do.not.call 2>/dev/null; then
+        :
+      else
+        echo "WARNING: cannot obscure git (sudo required)." >&2
+        echo "  The wrapper will still block agents, but /usr/bin/git" >&2
+        echo "  remains directly callable as a bypass." >&2
+      fi
+    fi
+    if [[ -e /usr/bin/git.do.not.call ]]; then
+      echo "Obscured git: /usr/bin/git -> /usr/bin/git.do.not.call"
+      # Remove /bin/git symlink if it pointed at the renamed /usr/bin/git
+      # (now dangling). Only touch it if it resolves to the path we moved.
+      if [[ -L /bin/git && "$(readlink /bin/git)" == "/usr/bin/git" ]]; then
+        rm /bin/git
+        echo "Removed dangling /bin/git symlink"
+      fi
+    fi
+  elif [[ -e /usr/bin/git.do.not.call ]]; then
+    echo "git already obscured (git.do.not.call present), skipping"
+  fi
+
+  # 4c. Verify PATH resolution: the wrapper must be the git found. If not,
+  #     enforcement is broken regardless of marker or obscuring.
+  RESOLVED_GIT=$(type -p git 2>/dev/null || true)
+  WANTED=$(readlink -f "$WRAPPER_DST")
+  if [[ "$(readlink -f "$RESOLVED_GIT" 2>/dev/null || true)" != "$WANTED" ]]; then
+    echo "ERROR: git enforcement is incomplete — wrong git on PATH." >&2
+    echo "  type -p git => $RESOLVED_GIT" >&2
+    echo "  expected     => $WRAPPER_DST" >&2
+    echo "  Check that $HOME/.cohort/bin is first on your PATH." >&2
+    exit 1
+  fi
+  echo "Verified: git => $RESOLVED_GIT"
+
+  # 4d. Create the enforcement marker — LAST, so any failure above leaves no
+  #     marker. The wrapper is the enforcement mechanism; the marker gates it.
   ENFORCE_MARKER="$HOME/.cohort/enforce-git"
   if [[ -f "$ENFORCE_MARKER" ]]; then
     echo "Git enforcement already enabled: $ENFORCE_MARKER"
@@ -131,30 +192,6 @@ if $ENFORCE_GIT; then
     touch "$ENFORCE_MARKER"
     echo "Git enforcement enabled: agents cannot git commit/push/rebase."
     echo "  Remove $ENFORCE_MARKER to disable."
-  fi
-
-  # Obscure the system git so agents can't find it: the wrapper is the only
-  # `git` on PATH, and the real binary is moved to a name that signals the
-  # proscription to anything that stumbles on it. Requires root; safe to
-  # re-run (skips if already renamed). /bin/git (a symlink to /usr/bin/git
-  # on Debian) becomes dangling and is removed so nothing points at the
-  # moved binary.
-  if [[ -x /usr/bin/git && ! -e /usr/bin/git.do.not.call ]]; then
-    if [[ -w /usr/bin ]]; then
-      mv /usr/bin/git /usr/bin/git.do.not.call
-    else
-      echo "Need root to obscure git: sudo mv /usr/bin/git /usr/bin/git.do.not.call" >&2
-      exit 1
-    fi
-    # Remove /bin/git symlink if it pointed at the renamed /usr/bin/git
-    # (now dangling). Only touch it if it resolves to the path we moved.
-    if [[ -L /bin/git && "$(readlink /bin/git)" == "/usr/bin/git" ]]; then
-      rm /bin/git
-      echo "Removed dangling /bin/git symlink"
-    fi
-    echo "Obscured git: /usr/bin/git -> /usr/bin/git.do.not.call"
-  elif [[ -e /usr/bin/git.do.not.call ]]; then
-    echo "git already obscured (git.do.not.call present), skipping"
   fi
 fi
 
