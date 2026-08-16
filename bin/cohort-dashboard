@@ -213,6 +213,55 @@ function commitUrl(repo, sha)   { return repo.web ? `${repo.web}/commit/${encode
 function compareUrl(repo, base, head) {
   return repo.web ? `${repo.web}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}` : '';
 }
+
+// Urgency ordering, most immediate first:
+//
+//   0  open PR, ready            — live work awaiting review/merge
+//   1  open PR, draft            — live work, not yet reviewable
+//   2  dirty or unpushed         — in motion right now, no live PR
+//   3+ clean, no PR              — recency bands (<1d, <3d, <7d, older)
+//   9  merged / deleted upstream — history, sink to the bottom
+//
+// The sort is stable and falls back to commit recency within a band, so
+// recently-touched branches float while merged/deleted ones settle last.
+function recencyBand(days) {
+  if (!Number.isFinite(days)) return 3;
+  if (days < 1) return 0;
+  if (days < 3) return 1;
+  if (days < 7) return 2;
+  return 3;
+}
+
+function rowUrgency(entry) {
+  const prState = entry.pr_state || '';
+  if (prState === 'OPEN') return entry.pr_draft ? 1 : 0;
+  if (entry.dirty_files || entry.ahead) return 2;  // in-flight work, no live PR
+  if (prState === 'MERGED' || entry.deleted || entry.merged) return 9;
+  return 3 + recencyBand(Number(entry.days_since_last_commit));
+}
+
+// Compare two rows: urgency first, then most-recent-commit-first within the
+// same band (recent commits are important; ties keep prep order — stable).
+function urgencyCmp(a, b) {
+  const u = rowUrgency(a) - rowUrgency(b);
+  if (u) return u;
+  const da = Number(a.days_since_last_commit), db = Number(b.days_since_last_commit);
+  const fa = Number.isFinite(da), fb = Number.isFinite(db);
+  if (fa && fb) return da - db;
+  if (fa) return -1;
+  if (fb) return 1;
+  return 0;
+}
+
+// Open PRs are all live by definition; order them by how recently they
+// moved (updatedAt, else createdAt), drafts after ready ones.
+function prCmp(a, b) {
+  if ((a.isDraft ? 1 : 0) !== (b.isDraft ? 1 : 0)) return a.isDraft ? 1 : -1;
+  const ta = Date.parse(a.updatedAt) || Date.parse(a.createdAt) || 0;
+  const tb = Date.parse(b.updatedAt) || Date.parse(b.createdAt) || 0;
+  return tb - ta;
+}
+
 // gh returns PR URLs on the canonical github.com host even when we're on an
 // int mirror; the page only reaches the right UI if the host matches the
 // repo's origin, so re-home any URL that has a different host.
@@ -311,9 +360,15 @@ function render(data) {
   document.getElementById('summary').innerHTML = cards;
 
   const views = (data.repos || []).map(repo => {
-    const wts = repo.worktrees || [];
-    const orphans = (repo.orphans || []).filter(o => o.status === 'merged' || o.status === 'orphan');
-    const open = repo.open_prs || [];
+    // Urgency order: active PRs first, recent commits up top, merged/deleted
+    // at the tail — see rowUrgency. Orphans/remote-only keep the same
+    // comparator (they are mostly merged history, but the sort is uniform).
+    const wts = (repo.worktrees || []).slice().sort(urgencyCmp);
+    const orphans = (repo.orphans || [])
+      .filter(o => o.status === 'merged' || o.status === 'orphan')
+      .sort(urgencyCmp);
+    const open = (repo.open_prs || []).slice().sort(prCmp);
+    const remoteOnly = (repo.remote_only || []).slice().sort(urgencyCmp);
     const rows = wts.map(wt => `
       <tr>
         ${branchCell(repo, wt.branch, {
@@ -346,7 +401,6 @@ function render(data) {
         <td colspan="2">${o.head_short ? (o.on_remote !== false || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : ''}</td>
       </tr>`).join('');
     const prRows = open.map(pr => prRow(pr, repo)).join('');
-    const remoteOnly = repo.remote_only || [];
     return `
       <h2>${fmt.esc(repo.name)} <span class="sub">· ${fmt.esc(repo.root)}</span></h2>
       <table>

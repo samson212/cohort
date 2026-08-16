@@ -268,6 +268,24 @@ the prep-derived (possibly optimistic) `on_remote` — acceptable, since
 that path is for when the network is down, when GitHub pages are
 unreachable anyway.
 
+## Row ordering — urgency first
+
+Every table is sorted most-immediate first, computed client-side in the
+page (`rowUrgency`/`urgencyCmp`), so the degraded `no_gh` path gets the
+same ordering without extra server work:
+
+1. **Active PRs** (open, ready before draft) — work awaiting review or
+   merge is the closest to done and the first thing to act on.
+2. **In-flight branches without a live PR** — dirty or ahead; next.
+3. **Clean branches with no PR** — ordered by recency bands (<1d, <3d,
+   <7d, older): recent commits are important, so hot branches float.
+4. **Merged / deleted-upstream / abandoned** — history, sinking to the
+   bottom (the bulk of the `orphans` and `remote_only` lists).
+
+Within a band, most-recent-commit-first; ties preserve prep order (the
+sort is stable). Open PRs order among themselves by last activity
+(`updatedAt`, else `createdAt`), drafts after ready ones.
+
 ## Not implemented / future work
 
 - Auth: the exe.dev proxy authenticates the operator; no app-level auth.
