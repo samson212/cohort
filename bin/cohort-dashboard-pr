@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime
 
 
 def run(args, timeout=20, cwd=None):
@@ -129,6 +130,59 @@ def enrich(entry, pr):
     entry["pr_head_sha_matches"] = bool(head) and entry.get("head_short") == head[:12]
 
 
+def recency_band(days):
+    """0,1,2,3 for <1d, <3d, <7d, older — the recency ladder."""
+    if days is None:
+        return 3
+    if days < 1:
+        return 0
+    if days < 3:
+        return 1
+    if days < 7:
+        return 2
+    return 3
+
+
+def urgency_key(entry):
+    """Sort key: lower = more urgent. See dashboard-design.md "Row
+    ordering". Must mirror the page's rowUrgency:
+      0 open PR ready, 1 open PR draft, 2 dirty/unpushed,
+      3 clean (band 0..3 -> 3..6), 9 merged/deleted.
+    """
+    pr_state = entry.get("pr_state") or ""
+    if pr_state == "OPEN":
+        return 1 if entry.get("pr_draft") else 0
+    if entry.get("dirty_files") or entry.get("ahead"):
+        return 2
+    if pr_state == "MERGED" or entry.get("deleted") or entry.get("merged"):
+        return 9
+    return 3 + recency_band(entry.get("days_since_last_commit"))
+
+
+def sort_groups(repo):
+    """Order every row by urgency, recency second — server-side, so
+    /api/data reflects the same ordering the page paints. Enrichment has
+    already run and is what fills pr_state/merged; orphan/remote-only
+    groups are mostly history and sink together."""
+    def key(entry):
+        days = entry.get("days_since_last_commit")
+        return (urgency_key(entry),
+                days if days is not None else float("inf"))
+    for group in (repo.get("worktrees", []),
+                  repo.get("orphans", []),
+                  repo.get("remote_only", [])):
+        group.sort(key=key)
+    # Open PRs: drafts after ready, then most recently updated first.
+    open_prs = repo.get("open_prs", [])
+    def _ts(p):
+        raw = p.get("updatedAt") or p.get("createdAt") or ""
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    open_prs.sort(key=lambda p: ((1 if p.get("isDraft") else 0), -_ts(p)))
+
+
 def status_after_reconcile(entry):
     """Reclassify a worktree's status once live-remote truth is known.
 
@@ -201,6 +255,7 @@ def main():
                 if pr:
                     enrich(entry, pr)
         repo["open_prs"] = prs.get("__open__", [])
+        sort_groups(repo)
     payload["pr_enriched"] = True
     print(json.dumps(payload))
 

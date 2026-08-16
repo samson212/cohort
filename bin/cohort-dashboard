@@ -214,7 +214,9 @@ function compareUrl(repo, base, head) {
   return repo.web ? `${repo.web}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}` : '';
 }
 
-// Urgency ordering, most immediate first:
+// Urgency ordering, most immediate first. Mirrors the server's urgency_key
+// in cohort-dashboard-pr (which already sorts /api/data); this client pass
+// only matters for the degraded no_gh path that skips the pr stage.
 //
 //   0  open PR, ready            — live work awaiting review/merge
 //   1  open PR, draft            — live work, not yet reviewable

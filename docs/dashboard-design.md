@@ -270,9 +270,10 @@ unreachable anyway.
 
 ## Row ordering — urgency first
 
-Every table is sorted most-immediate first, computed client-side in the
-page (`rowUrgency`/`urgencyCmp`), so the degraded `no_gh` path gets the
-same ordering without extra server work:
+Every table is sorted most-immediate first. The ordering is computed
+**server-side** in the pr stage (`sort_groups`, keyed by a per-entry
+`urgency_key`) so `/api/data` is authoritative — the page sorts again
+client-side only as a degraded `no_gh` fallback (pr stage skipped):
 
 1. **Active PRs** (open, ready before draft) — work awaiting review or
    merge is the closest to done and the first thing to act on.
@@ -284,7 +285,8 @@ same ordering without extra server work:
 
 Within a band, most-recent-commit-first; ties preserve prep order (the
 sort is stable). Open PRs order among themselves by last activity
-(`updatedAt`, else `createdAt`), drafts after ready ones.
+(`updatedAt`, else `createdAt`), drafts after ready ones. The client's
+`rowUrgency`/`urgencyCmp` mirror `urgency_key` so both paths agree.
 
 ## Not implemented / future work
 
