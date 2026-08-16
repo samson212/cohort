@@ -115,15 +115,6 @@ PAGE = """<!doctype html>
   .meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; align-items: center; }
   .meta .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 5px; }
   .wrap { max-width: 1200px; margin: 0 auto; padding: 22px 28px 60px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 18px 0 26px; }
-  .card {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-    padding: 14px 16px;
-    min-width: 0;
-  }
-  .card .num { font-size: 26px; font-weight: 700; }
-  .card .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; display: inline; }
-  .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; display: block; }
   h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin: 28px 0 10px; }
   table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -131,7 +122,7 @@ PAGE = """<!doctype html>
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: var(--panel2); }
   .branch { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-  .dead { color: var(--muted); opacity: .7; text-decoration-thickness: 1.5px; }
+  .dead { color: var(--muted); opacity: .7; }
   .subj { color: var(--muted); font-size: 12.5px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .badge {
     display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
@@ -160,15 +151,6 @@ PAGE = """<!doctype html>
     .meta { flex-wrap: wrap; }
     th.dirty-h, td.dirty-c { display: none; }
     .wrap { padding: 14px; }
-    .cards { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 10px; margin: 14px 0 18px; }
-    .card {
-      flex: 1 0 auto; padding: 10px 14px; white-space: nowrap;
-      display: flex; align-items: baseline; gap: 6px;
-    }
-    .card .num { font-size: 20px; }
-    .card .num::after { content: '·'; color: var(--muted); margin: 0 0 0 8px; font-weight: 400; }
-    .card .lbl { margin-top: 0; display: inline; text-transform: none; letter-spacing: .2px; font-size: 12.5px; }
-    .card .sub { display: none; }
   }
 </style>
 </head>
@@ -183,7 +165,6 @@ PAGE = """<!doctype html>
   </div>
 </header>
 <div class="wrap">
-  <div id="summary" class="cards"></div>
   <div id="repo-views"></div>
   <footer>Auto-refreshes every 30s · data collected from local git + <code>gh</code> · Cohort engine</footer>
 </div>
@@ -287,11 +268,11 @@ function branchCell(repo, name, opts = {}) {
     return `<td class="branch"><a href="${url}" target="_blank" rel="noopener">${inner}</a>${suffix}${sub}</td>`;
   }
   // Not on the remote: nothing to link to. Deleted branches (were on the
-  // remote, no longer are) are struck through so the operator can see they
-  // once existed; local-only branches just render plain — no link, no
+  // remote, no longer are) render grey so the operator can see they once
+  // existed; local-only branches just render plain — no link, no
   // decoration.
   if (opts.deleted) {
-    return `<td class="branch dead"><s>${inner}</s>${suffix}${sub}</td>`;
+    return `<td class="branch dead">${inner}${suffix}${sub}</td>`;
   }
   return `<td class="branch">${inner}${suffix}${sub}</td>`;
 }
@@ -348,18 +329,6 @@ function prRow(pr, repo) {
 function render(data) {
   const updated = document.getElementById('updated');
   updated.innerHTML = `<span class="dot"></span>updated ${fmt.time(data.collected_at || data.generated_at)}`;
-
-  let tWork = 0, tDirty = 0, tPRs = 0, tOrphan = 0;
-  for (const repo of data.repos || []) {
-    for (const wt of repo.worktrees || []) { tWork++; if (wt.dirty_files) tDirty++; }
-    tPRs += (repo.open_prs || []).length;
-    tOrphan += (repo.orphans || []).filter(o => o.status === 'merged').length;
-  }
-  const cards = `
-    <div class="card"><div class="num">${tWork}</div><div class="lbl">worktrees</div><div class="sub">${tDirty} dirty</div></div>
-    <div class="card"><div class="num">${tPRs}</div><div class="lbl">open PRs</div><div class="sub">across repos</div></div>
-    <div class="card"><div class="num">${tOrphan}</div><div class="lbl">merged orphans</div><div class="sub">branches to clean up</div></div>`;
-  document.getElementById('summary').innerHTML = cards;
 
   const views = (data.repos || []).map(repo => {
     // Urgency order: active PRs first, recent commits up top, merged/deleted

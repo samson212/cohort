@@ -22,7 +22,7 @@ one page so an operator can see, at a glance:
 - which branches are ahead of / behind their upstream or the default branch
 - which PRs are open, draft, or merged for each branch
 - which branches exist locally but were never pushed (unlinked, no decoration)
-- which branches were deleted from the remote after their PR merged (struck through)
+- which branches were deleted from the remote after their PR merged (rendered grey)
 - which branches exist only on the remote (no local ref, no worktree)
 - which local branches no longer have a worktree (cleanup candidates)
 
@@ -140,10 +140,10 @@ reality (prep's local-git-only status is overwritten for worktrees):
 | `local` | clean, never pushed / no upstream | none (unlinked) |
 
 `deleted` carries the final say on tree/compare linkability: a branch
-deleted from the remote loses its tree/compare links and its name is
-struck through — its PR page (if any) and head-SHA link (the merged commit
-lives in the default branch) still link. `local` branches are unlinked but
-not struck through: no decoration, they just don't link.
+deleted from the remote loses its tree/compare links and its name renders
+grey — its PR page (if any) and head-SHA link (the merged commit
+lives in the default branch) still link. `local` branches are unlinked and
+plain: no decoration, they just don't link.
 
 `dirty` wins. If there is a PR for the branch, its PR page is linked
 regardless of status.
@@ -168,11 +168,11 @@ Branches not on the remote have no `/tree/`, `/commit/`, or `/compare/`
 page. How they render depends on why they're not on the remote:
 
 - **Deleted upstream** (was on the remote, branch removed after the PR
-  merged): the branch name gets a strikethrough and no tree/compare link.
+  merged): the branch name renders grey and has no tree/compare link.
   The head SHA still links to `/commit/<sha>` — the merged commit is
   reachable from the default branch, so that page is alive.
 - **Local-only** (never pushed / no upstream): unlinked and plain — no
-  strikethrough, no decoration. The head SHA is also unlinked (those
+  grey, no decoration. The head SHA is also unlinked (those
   commits don't exist on GitHub).
 
 Both keep their PR badge if a PR exists — the PR page is still valid after
@@ -257,7 +257,7 @@ URL that 404s. The pr stage reconciles this: it runs one cheap
 git ls-remote --heads origin and rewrites `on_remote` for every
 worktree/orphan/remote-only entry to reflect which branches actually exist
 right now, and tags each entry `deleted` when it was on the remote but no
-longer is (struck through). Local-only branches — never pushed, no
+longer is (rendered grey). Local-only branches — never pushed, no
 upstream — are `deleted: false` and render unlinked with no decoration.
 Deleted branches keep their PR badge (the PR page is still valid) and
 their head-SHA link (the merged commit exists in the default branch), but
