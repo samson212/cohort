@@ -72,6 +72,28 @@ may have fetched. To undo a pushed commit, use `git revert` — it creates
 a new commit that inverts the old one, preserving history. For fixes that
 don't undo the commit entirely, make a new commit on top.
 
+### `git add` is the durability line
+
+Staging is not just a reviewability practice — it is the single most
+effective protection this workflow has against losing local work. The
+boundary is `git add`, not `git commit`:
+
+| Work state | Survives `reset --hard` / `clean -fdx`? | How to recover |
+|---|---|---|
+| Committed | Yes | `git reflog` (~30–90 days) |
+| Staged (`git add`) | Yes — the blob is in the object store | `git fsck --lost-found` |
+| Modified, unstaged | **No** | nothing — it's gone |
+| Untracked | **No** | nothing — it's gone |
+
+Unstaged and untracked work exists in exactly one place: the filesystem.
+One careless `reset --hard`, `clean -fdx`, or errant `rm` destroys it with
+no recovery path. The moment you `git add`, git writes a blob that outlives
+the working tree — recoverable even if the file is deleted and the branch
+is never committed.
+
+This is why staging early is expected behavior rather than something to
+defer: every minute of unstaged work is unbacked work.
+
 ## The loop
 
 1. **Work** — make one focused change.
@@ -80,7 +102,8 @@ don't undo the commit entirely, make a new commit on top.
    it with `git add` right away. Don't wait for a dedicated review pass to
    decide what's worth staging, and don't let unstaged changes pile up
    hoping to sort them out later — `git add` for this purpose is ordinary,
-   expected behavior, not something that needs asking first.
+   expected behavior, not something that needs asking first. It is also what
+   makes the work recoverable (see "`git add` is the durability line").
 3. Repeat until the task's scope is done, or it's a good point to wrap up.
 4. **Wrap up with `/cohort-commit`** — it looks at everything (staged,
    unstaged, and untracked), can stage more of it right there if some of it
