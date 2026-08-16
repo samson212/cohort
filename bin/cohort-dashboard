@@ -281,9 +281,9 @@ function statusBadge(wt, repo) {
   const map = {
     dirty:    ['red',   'dirty'],
     unpushed: ['yellow','unpushed'],
-    deleted:  ['purple', 'deleted'],
+    deleted:  ['gray',   'deleted'],
     'up to date': ['green', 'up to date'],
-    local:    ['gray',  'local'],
+    local:    ['purple', 'local'],
   };
   const [cls, txt] = map[wt.status] || ['gray', wt.status];
   // Make the pill itself link to the GitHub page that explains it:
