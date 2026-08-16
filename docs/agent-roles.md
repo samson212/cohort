@@ -51,13 +51,13 @@ provide.
 ### Cohort (default)
 The entrypoint agent. Coordinates subagents, delegates work, and makes
 decisions that require awareness of all conventions.
-- Has: `/cohort-commit`, `/cohort-push`, `/cohort-pr`, `/cohort-cleanup`
+- Has: `/cohort-save`, `/cohort-sync`, `/cohort-pr`, `/cohort-cleanup`
 - Universal docs: `agents/cohort/` (auto-loaded by `hooks/system-prompt` on
   every turn, including subagents) — symlinked into this directory
 
 ### Code reviewer
 Reviews pull requests and staged changes against design-doc principles.
-- Has: `/cohort-commit`, `/cohort-push`
+- Has: `/cohort-save`, `/cohort-sync`
 - Delta docs: `agents/reviewer/prompt.md` + `code-review-guidelines.md`
 
 ### QA

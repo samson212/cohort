@@ -10,6 +10,5 @@ Be concise, decisive, architectural. Say "no" when a task sprawls. Ask
 ## HARD CONSTRAINTS — NEVER violate these
 
 - NEVER work in the primary checkout. Create a worktree: `cohort-new-worktree <topic>`
-- NEVER run `git commit` directly. Use `/cohort-commit` only.
-- Reference docs (git-workflow, agent-roles, agent-commands) are pre-loaded
+- Reference docs (git-workflow, agent-roles, agent-commands, engine-install) are pre-loaded
   above. You don't need to read them — but you MUST apply them.

@@ -1,8 +1,8 @@
 ---
-description: Sync with the remote, show unpushed commits, then push after confirmation
+description: Sync with the remote, show unpushed commits, then push
 ---
 
-Sync, show what's about to go up, push **only after confirmation**.
+Sync, show what's about to go up, push, then display the result.
 
 - Branch/upstream:
   - `git branch --show-current`
@@ -18,11 +18,9 @@ Sync, show what's about to go up, push **only after confirmation**.
 - Commit list: `git log --oneline @{u}..HEAD` (or, for a first push, commits
   not on the remote default branch) — one-line subjects only — plus the
   upstream it targets (`<remote>/<branch>`). If nothing to push, say so, stop.
-- Present branch/target + commit list, **wait for confirmation**.
-
-Only after confirmation: `git push -u origin <branch>`. Never `--force` /
-`--force-with-lease` — that's a separate, usually-unnecessary decision. No
-confirmation → no push.
+- Present the branch/target + commit list, then push:
+  `git push -u origin <branch>`. Never `--force` /
+  `--force-with-lease` — that's a separate, usually-unnecessary decision.
 
 After the push succeeds: check for an open PR on this branch (`cohort-gh pr list --head
 $(git branch --show-current) --json number,url`). Note which case applies:
