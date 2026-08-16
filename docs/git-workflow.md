@@ -72,6 +72,18 @@ may have fetched. To undo a pushed commit, use `git revert` — it creates
 a new commit that inverts the old one, preserving history. For fixes that
 don't undo the commit entirely, make a new commit on top.
 
+## Commit message format
+
+Every commit, whether made via `/cohort-save` or `git commit` directly:
+
+- **Subject**: one line, <80 chars, lowercase, present-tense, verb-first
+  (e.g. "add", "fix", "rename", "remove")
+- **Body**: blank line after subject, then bulleted list. Each bullet
+  describes one clearly scoped change — its kind and why, not file-by-file
+- **Trailer**: `Co-Authored-By: $(cohort-model-name)`. The invocation
+  must be run at commit time so it reflects the active model — never reuse
+  a name from earlier in the session
+
 ### `git add` is the durability line
 
 Staging is not just a reviewability practice — it is the single most

@@ -38,19 +38,15 @@ Then work through these — each step is a single sentence, no more:
    remaining unstaged modifications to tracked files
    (`git diff --name-only`). If any exist, flag them — they will not be
    included in this commit. Confirm this is intentional.
-4. Commit message:
-   - Draft a one-line subject (<80 chars), blank line, then a bulleted
-     body. Count is free, but each bullet must describe one clearly scoped
-     change — its kind and why, not file-by-file. Show the draft.
-   - Trailer: append `Co-Authored-By: $(cohort-model-name)`. The model-name
-     invocation must be run at commit time so it reflects the active model.
-   - Write the message to a temp file, then run
-     `git commit -F <message-file>` (NEVER `git commit` directly in a
-     verbose tab — the output is too large). Never `--no-verify`,
-     `--no-gpg-sign`, `-c commit.gpgsign=false`, or force-amend — if a
-     pre-commit hook fails, fix the issue, `git add -p`, and re-run.
-   - Confirm the commit landed: `git log -1 --oneline`. If the hash doesn't
-     match, stop and investigate.
+4. Commit message — follow the format in git-workflow.md (subject <80,
+   bulleted body, `Co-Authored-By` trailer):
+   - Draft and show the message.
+   - Write to a temp file, run `git commit -F <message-file>` (NEVER
+     `git commit` directly in a verbose tab — the output is too large).
+     Never `--no-verify`, `--no-gpg-sign`, `-c commit.gpgsign=false`,
+     or force-amend — if a pre-commit hook fails, fix the issue,
+     `git add -p`, and re-run.
+   - Confirm the commit landed: `git log -1 --oneline`.
 5. Display the commit message as confirmation of what was saved — the user
    can `--amend` if something looks wrong.
 
