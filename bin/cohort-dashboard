@@ -91,7 +91,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cohort dashboard</title>
+<title>cohort dashboard</title>
 <style>
   :root {
     --bg: #0f1419; --panel: #171c23; --panel2: #1d242d;
@@ -156,7 +156,7 @@ PAGE = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>◧ Cohort dashboard</h1>
+  <h1>◧ cohort dashboard</h1>
   <span class="sub">worktrees &amp; pull requests</span>
   <div class="spacer"></div>
   <div class="meta">
@@ -166,7 +166,7 @@ PAGE = """<!doctype html>
 </header>
 <div class="wrap">
   <div id="repo-views"></div>
-  <footer>Auto-refreshes every 30s · data collected from local git + <code>gh</code> · Cohort engine</footer>
+  <footer>Auto-refreshes every 30s · data collected from local git + <code>gh</code> · cohort engine</footer>
 </div>
 <script>
 const fmt = {
@@ -416,7 +416,7 @@ setInterval(refresh, 30000);
 # ── HTTP ─────────────────────────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CohortDashboard/1"
+    server_version = "cohort-dashboard/1"
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         self.send_response(code)
@@ -465,7 +465,7 @@ def main():
     global _cache
     _cache = DataCache(ttl=refresh)
     srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"Cohort dashboard on http://0.0.0.0:{port} (refresh {refresh}s)")
+    print(f"cohort dashboard on http://0.0.0.0:{port} (refresh {refresh}s)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
