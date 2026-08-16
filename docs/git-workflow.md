@@ -78,7 +78,7 @@ This is the worktree equivalent of `git checkout -b <topic>`. It:
 
 After moving, your working directory is still the primary checkout —
 `cd ~/worktrees/<topic>` to resume work there, then use
-`/cohort-commit` as usual.
+`/cohort-save` as usual.
 
 ## Keep branches small in scope
 
@@ -104,6 +104,40 @@ may have fetched. To undo a pushed commit, use `git revert` — it creates
 a new commit that inverts the old one, preserving history. For fixes that
 don't undo the commit entirely, make a new commit on top.
 
+## Commit message format
+
+Every commit, whether made via `/cohort-save` or `git commit` directly:
+
+- **Subject**: one line, <80 chars, lowercase, present-tense, verb-first
+  (e.g. "add", "fix", "rename", "remove")
+- **Body**: blank line after subject, then bulleted list. Each bullet
+  describes one clearly scoped change — its kind and why, not file-by-file
+- **Trailer**: `Co-Authored-By: $(cohort-model-name)`. The invocation
+  must be run at commit time so it reflects the active model — never reuse
+  a name from earlier in the session
+
+### `git add` is the durability line
+
+Staging is not just a reviewability practice — it is the single most
+effective protection this workflow has against losing local work. The
+boundary is `git add`, not `git commit`:
+
+| Work state | Survives `reset --hard` / `clean -fdx`? | How to recover |
+|---|---|---|
+| Committed | Yes | `git reflog` (~30–90 days) |
+| Staged (`git add`) | Yes — the blob is in the object store | `git fsck --lost-found` |
+| Modified, unstaged | **No** | nothing — it's gone |
+| Untracked | **No** | nothing — it's gone |
+
+Unstaged and untracked work exists in exactly one place: the filesystem.
+One careless `reset --hard`, `clean -fdx`, or errant `rm` destroys it with
+no recovery path. The moment you `git add`, git writes a blob that outlives
+the working tree — recoverable even if the file is deleted and the branch
+is never committed.
+
+This is why staging early is expected behavior rather than something to
+defer: every minute of unstaged work is unbacked work.
+
 ## The loop
 
 1. **Work** — make one focused change.
@@ -112,26 +146,13 @@ don't undo the commit entirely, make a new commit on top.
    it with `git add` right away. Don't wait for a dedicated review pass to
    decide what's worth staging, and don't let unstaged changes pile up
    hoping to sort them out later — `git add` for this purpose is ordinary,
-   expected behavior, not something that needs asking first.
+   expected behavior, not something that needs asking first. It is also what
+   makes the work recoverable (see "`git add` is the durability line").
 3. Repeat until the task's scope is done, or it's a good point to wrap up.
-4. **Wrap up with `/cohort-commit`** — it looks at everything (staged,
+4. **Wrap up with `/cohort-save`** — it looks at everything (staged,
    unstaged, and untracked), can stage more of it right there if some of it
-   belongs in this commit, drafts and confirms a message, commits — then
-   leaves the push for later, when `/cohort-push` is invoked.
-
-### Hard rule: `/cohort-commit` is not optional
-
-Never run `git commit` directly — under any circumstances, including when
-the diff looks obviously correct, when a commit message was already drafted
-and agreed on earlier in conversation, or when the user's phrasing is
-general encouragement rather than a specific instruction (e.g. "let's fix
-it," "go ahead," "sounds good"). None of those are the confirmation
-`/cohort-commit` is built to collect. A commit being local and reversible does
-not waive this — that's a general default this repo overrides on purpose.
-Freely staging with `git add` as you go (see above), or inspecting state
-with `git status`/`git diff`, is fine; committing outside `/cohort-commit` is
-not. If you catch yourself about to type `git commit`, stop and invoke the
-slash command instead.
+   belongs in this commit, drafts a message, commits, then displays the
+   result. Push later with `/cohort-sync` when the branch's work is complete.
 
 ## Parking work
 
@@ -141,19 +162,18 @@ it. Resuming later means reusing that worktree, not starting over.
 
 ## Pushing
 
-`/cohort-commit` commits locally only. Use `/cohort-push` when the branch's work
+`/cohort-save` commits locally only. Use `/cohort-sync` when the branch's work
 is complete — typically after several commits — to sync and publish.
-`/cohort-push` is standalone: it syncs with the remote, shows what's about to
-go up, and pushes only after confirmation. Once pushed, use `/cohort-pr` to
-open a pull request — it drafts a title and description from the commit set
-and creates the PR **as a draft** after confirmation (drafts are mandatory;
-`--draft` is hardcoded in the command). If a PR already exists for the branch,
-`/cohort-pr` updates its description to reflect any new commits.
+`/cohort-sync` is standalone: it fetches, shows what's about to go up, pushes,
+then displays the result. Once pushed, use `/cohort-pr` to open a pull request —
+it drafts a title and description from the commit set and creates the PR
+**as a draft** after confirmation (drafts are mandatory; `--draft` is hardcoded
+in the command). If a PR already exists for the branch, `/cohort-pr` updates its
+description to reflect any new commits.
 
-This doesn't mean over-verifying a simple, unambiguous, explicitly-requested
-git command (e.g. a plain "push this") with unrequested pre-flight recon —
-reserve that instinct for genuinely ambiguous or destructive operations;
-`/cohort-push`'s own confirmation step already covers the ordinary case.
+GitHub Actions CI gates on draft status — jobs fire only when the PR moves out
+of draft — so pushing to a draft PR triggers no CI. A human marks the PR ready
+when they want review and CI to run.
 
 ## Cleaning up after a PR has been closed
 

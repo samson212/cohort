@@ -31,7 +31,7 @@ Pluggable slash commands. When a user sends a message starting with
 `/cohort-*` (commit, push, pr, cleanup), Shelley runs the matching
 `hooks/slash/cohort-<name>` hook; its stdout replaces the user message.
 Each hook cats the corresponding prompt in `commands/cohort-<name>.md` —
-frontmatter and all — so `/cohort-commit` becomes the full procedure text
+frontmatter and all — so `/cohort-save` becomes the full procedure text
 for the LLM to follow.
 
 The prompt file in `commands/` is the single source of truth; the hooks

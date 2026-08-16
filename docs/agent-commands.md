@@ -8,7 +8,7 @@ so it never drifts from the source.
 
 | Command | File | What it does |
 |----------|------|--------------|
-| `/cohort-commit` | `commands/cohort-commit.md` | Review, stage, confirm, commit |
-| `/cohort-push` | `commands/cohort-push.md` | Sync, show commits, push after confirmation |
+| `/cohort-save` | `commands/cohort-save.md` | Review, stage, commit, display message |
+| `/cohort-sync` | `commands/cohort-sync.md` | Fetch, show commits, push, display result |
 | `/cohort-pr` | `commands/cohort-pr.md` | Create draft PR or update description for the current branch |
 | `/cohort-cleanup` | `commands/cohort-cleanup.md` | Check unresolved comments, hand off merge, clean up worktree/branch, update main |
