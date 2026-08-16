@@ -3,18 +3,18 @@ description: Create or update a pull request — draft title/description for the
 ---
 
 Create a pull request for the current branch, or update the description of an
-existing one. The branch must already be pushed (use `/cohort-push` first).
+existing one. The branch must already be pushed (use `/cohort-sync` first).
 
 ### 1. Check local state
 
 - `git status` → if there are staged, unstaged, or untracked changes, stop.
-  Tell the user to run `/cohort-commit` and `/cohort-push` first.
+  Tell the user to run `/cohort-save` and `/cohort-sync` first.
 - Check for unpushed commits. The branch may have no upstream yet, so guard
   for that: `git rev-parse --abbrev-ref --symbolic-full-name @{u}`.
   - No upstream → the branch was never pushed. Stop, tell the user to run
-    `/cohort-push` first.
+    `/cohort-sync` first.
   - Upstream exists → `git log --oneline @{u}..HEAD`. If any commits are
-    listed, stop and tell the user to `/cohort-push` first.
+    listed, stop and tell the user to `/cohort-sync` first.
 
 All local work must be committed and pushed before running this command.
 
