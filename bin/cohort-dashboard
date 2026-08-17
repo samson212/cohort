@@ -9,7 +9,6 @@ single-page dashboard. No dependencies beyond Python 3 stdlib.
 Endpoints:
     /            the dashboard HTML
     /api/data    fresh JSON (git+gh, cached for --refresh seconds)
-    /api/data?no_gh=1   git-only JSON (skip gh for speed)
     /healthz     "ok"
 """
 
@@ -22,7 +21,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
 DEFAULT_PORT = 6283
 DEFAULT_REFRESH = 30  # seconds between data refreshes
@@ -59,48 +58,40 @@ class DataCache:
     """Thin TTL cache around the collect pipeline.
 
     gh is slow (network); git is fast. The dashboard refreshes often, so
-    cache the combined payload for a few seconds and let 'no_gh' scrape by
-    with just the git half for instant feedback.
+    cache the combined payload for a few seconds.
     """
 
     def __init__(self, ttl=DEFAULT_REFRESH):
         self.ttl = ttl
         self._lock = threading.Lock()
-        self._full = None
-        self._full_at = 0.0
-        self._no_gh = None
-        self._no_gh_at = 0.0
+        self._data = None
+        self._at = 0.0
 
-    def _collect(self, no_gh):
+    def _collect(self):
         proc = subprocess.run([PREP], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, timeout=120)
         if proc.returncode != 0:
             raise RuntimeError(f"prep failed: {proc.stderr[:500]}")
         data = json.loads(proc.stdout)
-        if not no_gh:
-            proc = subprocess.run([PR_SCRIPT], input=proc.stdout, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, timeout=120)
-            if proc.returncode != 0:
-                # gh failure shouldn't kill the dashboard: fall back to git-only
-                data["pr_error"] = proc.stderr[:300]
-            else:
-                data = json.loads(proc.stdout)
+        proc = subprocess.run([PR_SCRIPT], input=proc.stdout, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, timeout=120)
+        if proc.returncode != 0:
+            # gh failure shouldn't kill the dashboard: fall back to git-only
+            data["pr_error"] = proc.stderr[:300]
+        else:
+            data = json.loads(proc.stdout)
         data["collected_at"] = datetime.now(timezone.utc).isoformat()
         return data
 
-    def get(self, no_gh=False):
+    def get(self):
         now = time.monotonic()
         with self._lock:
-            bucket = self._no_gh if no_gh else self._full
-            at = self._no_gh_at if no_gh else self._full_at
+            bucket, at = self._data, self._at
             if bucket is not None and now - at < self.ttl:
                 return bucket
-        data = self._collect(no_gh)
+        data = self._collect()
         with self._lock:
-            if no_gh:
-                self._no_gh, self._no_gh_at = data, now
-            else:
-                self._full, self._full_at = data, now
+            self._data, self._at = data, now
         return data
 
 
@@ -217,47 +208,6 @@ function compareUrl(repo, base, head) {
   return repo.web ? `${repo.web}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}` : '';
 }
 
-// Urgency ordering, most immediate first. Mirrors the server's urgency_key
-// in cohort-dashboard-pr (which already sorts /api/data); this client pass
-// only matters for the degraded no_gh path that skips the pr stage.
-//
-//   0  open PR, ready            — live work awaiting review/merge
-//   1  open PR, draft            — live work, not yet reviewable
-//   2  dirty or unpushed         — in motion right now, no live PR
-//   3+ clean, no PR              — recency bands (<1d, <3d, <7d, older)
-//   9  merged / deleted upstream — history, sink to the bottom
-//
-// The sort is stable and falls back to commit recency within a band, so
-// recently-touched branches float while merged/deleted ones settle last.
-function recencyBand(days) {
-  if (!Number.isFinite(days)) return 3;
-  if (days < 1) return 0;
-  if (days < 3) return 1;
-  if (days < 7) return 2;
-  return 3;
-}
-
-function rowUrgency(entry) {
-  const prState = entry.pr_state || '';
-  if (prState === 'OPEN') return entry.pr_draft ? 1 : 0;
-  if (entry.dirty_files || entry.ahead) return 2;  // in-flight work, no live PR
-  if (prState === 'MERGED' || entry.deleted || entry.merged) return 9;
-  return 3 + recencyBand(Number(entry.days_since_last_commit));
-}
-
-// Compare two rows: urgency first, then most-recent-commit-first within the
-// same band (recent commits are important; ties keep prep order — stable).
-function urgencyCmp(a, b) {
-  const u = rowUrgency(a) - rowUrgency(b);
-  if (u) return u;
-  const da = Number(a.days_since_last_commit), db = Number(b.days_since_last_commit);
-  const fa = Number.isFinite(da), fb = Number.isFinite(db);
-  if (fa && fb) return da - db;
-  if (fa) return -1;
-  if (fb) return 1;
-  return 0;
-}
-
 // Open PRs are all live by definition; order them by how recently they
 // moved (updatedAt, else createdAt), drafts after ready ones.
 function prCmp(a, b) {
@@ -353,15 +303,13 @@ function render(data) {
   updated.innerHTML = `<span class="dot"></span>updated ${fmt.time(data.collected_at || data.generated_at)}`;
 
   const views = (data.repos || []).map(repo => {
-    // Urgency order: active PRs first, recent commits up top, merged/deleted
-    // at the tail — see rowUrgency. Orphans/remote-only keep the same
-    // comparator (they are mostly merged history, but the sort is uniform).
-    const wts = (repo.worktrees || []).slice().sort(urgencyCmp);
+    // The server (sort_groups) has already ordered every group — active PRs
+    // first, merged/deleted at the tail. Rows are rendered in payload order.
+    const wts = repo.worktrees || [];
     const orphans = (repo.orphans || [])
-      .filter(o => o.status === 'merged' || o.status === 'orphan')
-      .sort(urgencyCmp);
-    const open = (repo.open_prs || []).slice().sort(prCmp);
-    const remoteOnly = (repo.remote_only || []).slice().sort(urgencyCmp);
+      .filter(o => o.status === 'merged' || o.status === 'orphan');
+    const open = repo.open_prs || [];
+    const remoteOnly = repo.remote_only || [];
     const rows = wts.map(wt => `
       <tr>
         ${branchCell(repo, wt.branch, {
@@ -454,10 +402,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, b"ok", "text/plain")
             return
         if path == "/api/data":
-            qs = parse_qs(parsed.query)
-            no_gh = "no_gh" in qs
             try:
-                data = _cache.get(no_gh=no_gh)
+                data = _cache.get()
                 body = json.dumps(data).encode()
                 self._send(200, body)
             except Exception as exc:  # noqa: BLE001 — report, don't crash the server

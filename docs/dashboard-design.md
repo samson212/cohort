@@ -72,8 +72,8 @@ Pipeline:
   and writes enriched JSON. If `gh` fails or the `COHORT_NO_GH` env guard
   is set, it returns the input unchanged — the dashboard degrades to
   git-only rather than erroring.
-- **server** runs prep (and pr unless `no_gh`) on a TTL, caches the
-  result, and serves the HTML page and the JSON. It is the only long-lived
+- **server** runs prep (input to pr) on a TTL, caches the result, and
+  serves the HTML page and the JSON. It is the only long-lived
   process.
 
 The split has a second benefit: prep is independently testable — you can
@@ -292,9 +292,7 @@ dependency.**
   per repo via `error` fields, and the remaining repos still render.
 - subprocess timeouts (120s) bound how long any scrape can block; the TTL
   cache means a slow scrape only delays the next refresh, never blocks a
-  `no_gh` read.
-- The `no_gh=1` query param on `/api/data` forces the cheap git-only path
-  for probes and for periods when gh is down.
+  concurrent read.
 
 ## Discovery & dedup
 
@@ -327,17 +325,13 @@ Deleted branches keep their PR badge (the PR page is still valid) and
 their head-SHA link (the merged commit exists in the default branch), but
 lose their tree/compare links. When the ls-remote fails (no origin,
 network hiccup), prep's values are kept rather than guessed at.
-The server's `no_gh=1` fast path skips this stage entirely, so it shows
-the prep-derived (possibly optimistic) `on_remote` — acceptable, since
-that path is for when the network is down, when GitHub pages are
-unreachable anyway.
 
 ## Row ordering — urgency first
 
 Every table is sorted most-immediate first. The ordering is computed
 **server-side** in the pr stage (`sort_groups`, keyed by a per-entry
-`urgency_key`) so `/api/data` is authoritative — the page sorts again
-client-side only as a degraded `no_gh` fallback (pr stage skipped):
+`urgency_key`) — `/api/data` is authoritative, and the page renders
+rows exactly in payload order:
 
 1. **Active PRs** (open, ready before draft) — work awaiting review or
    merge is the closest to done and the first thing to act on.
@@ -349,8 +343,7 @@ client-side only as a degraded `no_gh` fallback (pr stage skipped):
 
 Within a band, most-recent-commit-first; ties preserve prep order (the
 sort is stable). Open PRs order among themselves by last activity
-(`updatedAt`, else `createdAt`), drafts after ready ones. The client's
-`rowUrgency`/`urgencyCmp` mirror `urgency_key` so both paths agree.
+(`updatedAt`, else `createdAt`), drafts after ready ones.
 
 ## Not implemented / future work
 
