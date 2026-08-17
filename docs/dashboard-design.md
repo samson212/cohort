@@ -2,9 +2,24 @@
 
 The dashboard is a zero-dependency view of the Cohort engine's working set:
 every worktree, its dirty state, its PR, and the branches that linger
-without a worktree. It runs as a single Python stdlib HTTP server on the
-VM and is meant to be read from a browser, refreshed periodically, and
-trusted to never fall over — including when GitHub's API is slow or down.
+without a worktree. It runs as a single Python stdlib HTTP server and is
+meant to be read from a browser, refreshed periodically, and trusted to
+never fall over — including when GitHub's API is slow or down.
+
+It is environment-agnostic by design: the server binds a port and serves
+relative paths. Whatever domain, reverse proxy, or auth layer wraps it is
+an external concern. On an exe.dev VM users typically expose it through
+the built-in HTTPS proxy; on a local machine they access it via
+`http://localhost:6283`. The port is set at install time with
+`cohort-init --dashboard-port` and stored in a config file.
+
+There is deliberately **no domain in the config**: the page serves only
+root-relative URLs (`/api/data`), which resolve against whatever origin
+the browser loaded the page from, so the same server works unchanged
+behind any proxy — same host, different port, localhost, or a custom
+domain. A hardcoded `<base href>` would point the fetch at a fixed
+origin and break every other entry point (e.g. a proxy that maps a
+non-default port). The config file therefore holds only the port.
 
 This document captures the current design. It is the source of truth for
 how the pieces fit; the code in `bin/` is the implementation.
@@ -185,7 +200,7 @@ the base it is usually a no-op.
 
 ## Deployment
 
-The service ships as a systemd unit:
+The dashboard ships as a systemd unit:
 
 ```
 bin/cohort-dashboard.service
@@ -194,28 +209,52 @@ bin/cohort-dashboard.service
 ```
 [Service]
 Type=simple
-User=exedev
-Environment=HOME=/home/exedev
-Environment=PATH=/home/exedev/.cohort/bin:…
-ExecStart=/home/exedev/.cohort/bin/cohort-dashboard --port 8000 --refresh 30
+User=%u
+Environment=HOME=%h
+Environment=PATH=%h/.cohort/bin:…
+ExecStart=%h/.cohort/bin/cohort-dashboard --port 6283 --refresh 30
 Restart=on-failure
 RestartSec=3
 ```
 
-- Runs as the VM user (`exedev`), not root — the discovery walk uses the
-  user's `$HOME`.
+- Uses `%u`/`%h` so the same file works on any machine — no hardcoded
+  usernames or paths.
 - `PATH` includes `~/.cohort/bin` so `cohort-gh` (a sibling in the same
   bin) is found.
-- Port 8000 is the exe.dev proxy default, so the page is
-  `https://<vm>.exe.xyz/`; the proxy handles auth.
+- Port 6283 is the default (an unused high-number port; see "Port
+  selection" below). On an exe.dev VM, expose it through the proxy:
+  `ssh exe.dev share port <vm> 6283`.
 - `--refresh` is the server-side cache TTL (default 30s); the page also
   auto-refreshes client-side on a fixed 30s timer.
 - The deployed script is the engine's `~/.cohort/bin/cohort-dashboard`
   (a symlink to the primary checkout's `bin/`), so the unit's intention is
   the stable path. During development it may be overridden with a drop-in
   pointing `ExecStart` at a worktree's copy — that override is temporary
-  and should be removed once the branch merges (see git-workflow's "Which
-  `bin/` to edit" note).
+  and should be removed once the branch merges.
+
+### Port selection
+
+The default port is **6283** — a high, unassigned port (τ × 1000, rounded)
+just `e^3`, a nod to Euler's number). It is unlikely to collide with any
+common service. Override with `--port` at any level:
+
+- In the server: `cohort-dashboard --port 9999`
+- In the systemd unit: change `ExecStart=`
+- At init time: `cohort-init --dashboard-port 9999` writes the config
+
+### Config file
+
+The config lives at `~/.config/cohort-dashboard/config` and holds only
+the port:
+
+```
+{
+  "port": 6283
+}
+```
+
+The systemd unit's `--port` flag overrides it; the default is 6283 when
+neither is set. There is no domain field — see "Why no domain" above.
 
 ## Failure handling
 
@@ -290,9 +329,11 @@ sort is stable). Open PRs order among themselves by last activity
 
 ## Not implemented / future work
 
-- Auth: the exe.dev proxy authenticates the operator; no app-level auth.
-- Multi-instance: one VM, one dashboard. Multiple VMs would each run
-  their own.
+- Auth: the dashboard has no built-in auth. Place it behind a reverse
+  proxy (exe.dev's built-in proxy handles auth automatically; nginx, Caddy,
+  or similar for other environments).
+- Multi-instance: one machine, one dashboard. Multiple VMs/machines would
+  each run their own.
 - Historical trends: the dashboard is a point-in-time snapshot; no metrics
   store.
 - Webhook-driven refreshes: currently cache-TTL only.

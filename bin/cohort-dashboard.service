@@ -5,11 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=exedev
-Group=exedev
-Environment=HOME=/home/exedev
-Environment=PATH=/home/exedev/.cohort/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=/home/exedev/.cohort/bin/cohort-dashboard --port 8000 --refresh 30
+User=%u
+Environment=HOME=%h
+Environment=PATH=%h/.cohort/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=%h/.cohort/bin/cohort-dashboard --port 6283 --refresh 30
 Restart=on-failure
 RestartSec=3
 
