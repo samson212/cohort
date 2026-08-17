@@ -446,40 +446,46 @@ def live_branches(repo):
     return names
 
 def collect_prs(repo):
-    """Return {branch: {…pr fields…}, '__open__': [pr, …], '__web__': url} for one repo.
+    """Return (data, status) for one repo.
 
-    Also resolves the canonical (public) web URL for the repo — gh knows the
-    real GitHub domain, whereas the git remote may point at an internal
-    mirror the browser/client can't reach.
+    data is {branch: {…pr fields…}, '__open__': [pr, …], '__web__': url}
+    and status is one of:
+      "ok"       — all gh calls succeeded (web URL + PR list)
+      "degraded" — at least one gh call failed; data may be partial
+                   (web URL falls back to git-derived, PRs may be absent)
+      "skipped"  — COHORT_NO_GH guard set, or no repo root; gh was
+                   deliberately not called (not an error)
     """
-    env_guard = os.environ.get("COHORT_NO_GH")
-    if env_guard:
-        return {}
+    if os.environ.get("COHORT_NO_GH"):
+        return {}, "skipped"
 
     root = repo.get("root")
     if not root or not os.path.isdir(root):
-        return {}
+        return {}, "skipped"
 
     result = {}
+    status = "ok"
     # Canonical web URL first: gh returns the public github.com address even
     # when the origin remote uses an internal mirror host.
-    rc, out, _ = gh(root, "repo", "view", "--json", "url")
+    rc, out, err = gh(root, "repo", "view", "--json", "url")
     if rc == 0 and out:
         try:
             url = json.loads(out).get("url", "")
             if url:
                 result["__web__"] = url.rstrip("/")
         except json.JSONDecodeError:
-            pass
+            status = "degraded"
+    else:
+        status = "degraded"
 
     rc, out, err = gh(root, "pr", "list", "--state", "all", "--limit", "100", "--json",
                       "number,title,state,url,isDraft,headRefName,createdAt,updatedAt,mergeable,additions,deletions")
     if rc != 0 or not out:
-        return result
+        return result, "degraded"
     try:
         prs = json.loads(out)
     except json.JSONDecodeError:
-        return result
+        return result, "degraded"
 
     open_prs = []
     for pr in prs:
@@ -489,7 +495,7 @@ def collect_prs(repo):
         if head:
             result[head] = pr
     result["__open__"] = open_prs
-    return result
+    return result, status
 
 def enrich(entry, pr):
     """Attach the four pr_* fields the page reads to an entry."""
@@ -578,14 +584,30 @@ def status_after_reconcile(entry):
     return "local"
 
 def collect_gh(payload):
+    """Enrich git facts with gh PR data; set the failure contract.
+
+    payload["pr_enriched"] is True only when EVERY repo's gh calls
+    succeeded. If any repo degraded (gh failed) or was skipped (guard / no
+    root), it is False. payload["pr_error"] carries a human-readable
+    reason when at least one repo degraded, and is None when everything
+    was ok or when gh was deliberately skipped (COHORT_NO_GH) — skipping
+    is not an error (design doc: pr_error is null when gh was skipped).
+    """
+    statuses = []
+    errors = []
     for repo in payload.get("repos", []):
-        prs = collect_prs(repo)
+        prs, status = collect_prs(repo)
+        statuses.append(status)
+        if status == "skipped":
+            continue
         # Canonical public web URL from gh (see collect_prs): the browser
         # links must point at the real GitHub domain, not an internal
         # mirror host derived from the git remote.
         web = prs.get("__web__")
         if web:
             repo["web"] = web
+        if status == "degraded":
+            errors.append(repo.get("name", repo.get("root", "?")))
         # Reconcile on_remote against the actual live branches: refs/
         # remotes/origin/* can hold refs whose upstream branch was deleted
         # (merged PR heads). Those must be struck through, not linked.
@@ -620,19 +642,26 @@ def collect_gh(payload):
                     enrich(entry, pr)
         repo["open_prs"] = prs.get("__open__", [])
         sort_groups(repo)
-    payload["pr_enriched"] = True
+    payload["pr_enriched"] = all(s == "ok" for s in statuses)
+    payload["pr_error"] = (
+        "gh failed for: " + "; ".join(errors) if errors else None
+    )
     return payload
 
 def full_payload(repos_override=None):
     """Collect git facts, then enrich with gh PR data.
 
     gh can be slow or fail; the dashboard degrades to git-only data with
-    a pr_error instead of 500ing (see design doc "Failure handling").
+    pr_enriched=false + pr_error set instead of 500ing (see design doc
+    "Failure handling"). collect_gh sets that contract for ordinary gh
+    failures; this wrapper only catches unexpected exceptions (a bug in
+    the collector itself), which would otherwise crash the server.
     """
     data = collect_git(repos_override)
     try:
         collect_gh(data)
     except Exception as exc:  # noqa: BLE001 — report, don't crash the server
+        data["pr_enriched"] = False
         data["pr_error"] = str(exc)[:300]
     return data
 

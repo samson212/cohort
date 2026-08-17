@@ -305,9 +305,9 @@ dependency.**
 - collect_git failures (e.g. a repo that isn't actually a git root) are
   isolated per repo via `error` fields, and the remaining repos still
   render.
-- subprocess timeouts (120s) bound how long any scrape can block; the TTL
-  cache means a slow scrape only delays the next refresh, never blocks a
-  concurrent read.
+- subprocess timeouts (git 20s, gh 25s, ls-remote 30s) bound how long any
+  scrape can block; the TTL cache means a slow scrape only delays the next
+  refresh, never blocks a concurrent read.
 
 ## Discovery & dedup
 
