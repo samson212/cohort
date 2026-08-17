@@ -104,7 +104,6 @@ One JSON document per scrape:
       "root": "/home/exedev/cohort",   # primary checkout (dedup canonical)
       "name": "cohort",
       "remote": "…",
-      "host": "github.int.exe.xyz",    # host part of the origin remote
       "web": "https://github.com/…",   # canonical browser URL (gh-derived)
       "default_branch": "main",
       "worktrees": [ … ],              # every checkout, incl. primary
@@ -124,9 +123,9 @@ One JSON document per scrape:
   "is_primary": false,                    "on_remote": true,
   "head": "<40-hex>", "head_short": "…",
   "staged": 1, "unstaged": 2, "untracked": 0, "dirty_files": 3,
-  "has_upstream": true, "upstream_ref": "origin/agent/foo",
+  "upstream_ref": "origin/agent/foo",
   "ahead": 2, "behind": 0, "commits_since_default": 2,
-  "subject": "…", "last_commit_at": "…Z", "days_since_last_commit": 1.2,
+  "subject": "…", "days_since_last_commit": 1.2,
   "status": "dirty",           # dirty | unpushed | deleted | up to date | local
   "pr_number": 12, "pr_state": "MERGED", "pr_url": "https://github.com/…/pull/12",
   "pr_draft": false
@@ -141,8 +140,8 @@ gets its richer fields directly from `gh` in `collect_gh`.
 ### orphan entry
 
 A local branch with **no worktree** (its worktree was cleaned up but the
-ref lingers). Fields: `branch`, `has_upstream`, `on_remote`, `merged`,
-`commits_since_default`, `subject`, `head`/`head_short`, `last_commit_at`,
+ref lingers). Fields: `branch`, `upstream_ref`, `on_remote`, `merged`,
+`commits_since_default`, `subject`, `head`/`head_short`,
 `days_since_last_commit`, plus `pr_*` enrichment when a PR matches.
 
 ### remote_only entry
@@ -155,8 +154,10 @@ cleaned-up merged PR head). Fields: `branch`, `head`, `head_short`,
 
 For each worktree, a single status string drives the pill. It is computed
 in the gh stage, after live-branch reconciliation, so the label reflects
-reality (collect_git's local-git-only status is overwritten for
-worktrees):
+reality (collect_git's local-git-only status is **always** reclassified
+for worktrees — even when the live check is skipped via `COHORT_NO_GH`
+or fails, the labels never leak collect_git's intermediate
+`idle`/`noupstream`):
 
 | status | meaning | link behavior |
 |---|---|---|

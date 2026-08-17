@@ -85,9 +85,10 @@ Goal: 1,262 → ~560 LOC, 60 → ~10 git spawns/repo, 3 processes → 1, one
     URLs only, never `<base href>`) folded into design doc as a
     two-line note.
   - Design doc: single status vocabulary (the `dirty|unpushed|deleted|
-    up to date|local` set; `collect_git`'s `new`/`noupstream`/`idle`
-    are intermediate, reclassified by `status_after_reconcile`);
-    `status_after_reconcile` docstring updated to `collect_git`.
+    up to date|local` set; `collect_git`'s `noupstream`/`idle`
+    are intermediate, reclassified unconditionally by
+    `status_after_reconcile` in collect_gh — even when the live check is
+    skipped or fails); `status_after_reconcile` docstring updated.
   - Deployment section: user-unit model; component section: one script
     one process; pipeline diagrams updated.
 

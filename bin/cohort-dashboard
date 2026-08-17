@@ -55,8 +55,8 @@ def _load_port_config():
             with open(CONFIG_FILE) as fh:
                 fcfg = json.load(fh)
             return int(fcfg.get("port", DEFAULT_PORT))
-    except (json.JSONDecodeError, ValueError, OSError):
-        pass
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        print(f"Warning: could not parse {CONFIG_FILE} ({exc}); using port {DEFAULT_PORT}", file=sys.stderr)
     return DEFAULT_PORT
 
 # ── git collection ──────────────────────────────────────────────────────
@@ -335,7 +335,6 @@ def scan_repo(root):
             "head_short": hd["head_short"],
         }
         item["subject"] = hd["subject"]
-        item["last_commit_at"] = hd["last_commit_at"]
         item["days_since_last_commit"] = days_since(hd["last_commit_at"])
 
         staged, unstaged, untracked = status_counts(wt_path)
@@ -345,7 +344,6 @@ def scan_repo(root):
         )
 
         upstream = hd["upstream_ref"]
-        item["has_upstream"] = bool(upstream)
         item["upstream_ref"] = upstream
         if upstream:
             item["ahead"], item["behind"] = upstream_ahead_behind(toplevel, upstream, branch)
@@ -356,8 +354,11 @@ def scan_repo(root):
 
         if item["dirty_files"]:
             status = "dirty"
-        elif not item["has_upstream"]:
-            status = "new" if item["ahead"] else "noupstream"
+        elif not upstream:
+            # No upstream: heads can't be ahead of a nonexistent ref — the
+            # ahead (left-right) count is 0, so "new" could never fire and
+            # was removed (dead branch).
+            status = "noupstream"
         elif item["ahead"]:
             status = "unpushed"
         else:
@@ -371,7 +372,6 @@ def scan_repo(root):
         ob = {
             "branch": branch,
             "upstream_ref": hd["upstream_ref"],
-            "has_upstream": bool(hd["upstream_ref"]),
             "on_remote": branch in remote_names,
             "head": hd["head"],
             "head_short": hd["head_short"],
@@ -379,9 +379,8 @@ def scan_repo(root):
         commits_since_default, merged = default_rel(hd)
         ob["merged"] = merged
         ob["commits_since_default"] = commits_since_default if commits_since_default is not None else 0
-        ob.update(subject=hd["subject"], last_commit_at=hd["last_commit_at"])
-        ob["days_since_last_commit"] = days_since(hd["last_commit_at"])
-        if not ob["has_upstream"]:
+        ob.update(subject=hd["subject"], days_since_last_commit=days_since(hd["last_commit_at"]))
+        if not ob["upstream_ref"]:
             ob["status"] = "merged" if ob["merged"] else "orphan"
         else:
             ob["status"] = "merged" if ob["merged"] else "tracked"
@@ -555,14 +554,17 @@ def sort_groups(repo):
     open_prs.sort(key=lambda p: ((1 if p.get("isDraft") else 0), -_ts(p)))
 
 def status_after_reconcile(entry):
-    """Reclassify a worktree's status once live-remote truth is known.
+    """Map a worktree to the page's final status vocabulary.
 
-    collect_git's status only knows what local git refs say: a clean
-    branch whose remote-tracking ref lingers (merged PR, branch deleted
-    upstream) is tagged "idle" even though its GitHub page is gone, and a
-    never-pushed branch is "noupstream". Now that on_remote/deleted
-    reflect reality, tighten the labels so the pill says what's actually
-    true:
+    collect_git's status only knows what local git refs say ("idle",
+    "noupstream", "unpushed", "dirty") — a clean branch whose
+    remote-tracking ref lingers (merged PR, branch deleted upstream) looks
+    "idle" and a never-pushed branch "noupstream", neither of which the
+    page knows. This is applied unconditionally in collect_gh: once
+    live-branch reconciliation has run, on_remote/deleted reflect reality;
+    when it was skipped (COHORT_NO_GH) or failed (ls-remote timeout),
+    on_remote/deleted keep the ref-derived values and the label is what
+    they claim:
 
       dirty       uncommitted changes (unchanged)
       unpushed    ahead of upstream (unchanged)
@@ -598,8 +600,6 @@ def collect_gh(payload):
     for repo in payload.get("repos", []):
         prs, status = collect_prs(repo)
         statuses.append(status)
-        if status == "skipped":
-            continue
         # Canonical public web URL from gh (see collect_prs): the browser
         # links must point at the real GitHub domain, not an internal
         # mirror host derived from the git remote.
@@ -611,13 +611,16 @@ def collect_gh(payload):
         # Reconcile on_remote against the actual live branches: refs/
         # remotes/origin/* can hold refs whose upstream branch was deleted
         # (merged PR heads). Those must be struck through, not linked.
-        live = live_branches(repo)
-        if live is not None:
-            for label, group in (("worktrees", repo.get("worktrees", [])),
-                                 ("orphans", repo.get("orphans", [])),
-                                 ("remote_only", repo.get("remote_only", []))):
-                for entry in group:
-                    existed = entry.get("on_remote", False)
+        # Skipped mode (COHORT_NO_GH) means "don't talk to GitHub", and
+        # ls-remote is a network round-trip — skip it there too and keep
+        # collect_git's ref-derived values (stale at worst).
+        live = None if status == "skipped" else live_branches(repo)
+        for label, group in (("worktrees", repo.get("worktrees", [])),
+                             ("orphans", repo.get("orphans", [])),
+                             ("remote_only", repo.get("remote_only", []))):
+            for entry in group:
+                existed = entry.get("on_remote", False)
+                if live is not None:
                     entry["on_remote"] = entry.get("branch", "") in live
                     if label == "remote_only":
                         # remote_only entries are remote-tracking refs by
@@ -631,8 +634,14 @@ def collect_gh(payload):
                         # decoration.
                         deleted = bool(existed) and not entry["on_remote"]
                     entry["deleted"] = deleted
-                    if label == "worktrees":
-                        entry["status"] = status_after_reconcile(entry)
+                # Reclassification is unconditional: the page only knows
+                # the final status vocabulary. Without live data (gh
+                # skipped or ls-remote failed) on_remote is the stale
+                # ref-derived value and deleted stays unknown, but the
+                # label vocabulary never leaks collect_git's
+                # intermediate "idle"/"noupstream"/"new" intermediates.
+                if label == "worktrees":
+                    entry["status"] = status_after_reconcile(entry)
         for group in (repo.get("worktrees", []),
                       repo.get("orphans", []),
                       repo.get("remote_only", [])):
@@ -810,15 +819,6 @@ function compareUrl(repo, base, head) {
   return repo.web ? `${repo.web}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}` : '';
 }
 
-// Open PRs are all live by definition; order them by how recently they
-// moved (updatedAt, else createdAt), drafts after ready ones.
-function prCmp(a, b) {
-  if ((a.isDraft ? 1 : 0) !== (b.isDraft ? 1 : 0)) return a.isDraft ? 1 : -1;
-  const ta = Date.parse(a.updatedAt) || Date.parse(a.createdAt) || 0;
-  const tb = Date.parse(b.updatedAt) || Date.parse(b.createdAt) || 0;
-  return tb - ta;
-}
-
 // gh returns PR URLs on the canonical github.com host even when we're on an
 // int mirror; the page only reaches the right UI if the host matches the
 // repo's origin, so re-home any URL that has a different host.
@@ -937,7 +937,7 @@ function render(data) {
         <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.status === 'merged' ? 'merged' : 'orphan'}</span>`}</td>
         <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
         <td>${fmt.age(o.days_since_last_commit)} ago</td>
-        <td colspan="2">${o.head_short ? (o.on_remote || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : fmt.esc(o.upstream_ref || '')}</td>
+        <td colspan="2">${o.head_short ? (o.on_remote || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : ''}</td>
       </tr>`).join('');
     const remoteRows = (repo.remote_only || []).map(o => `
       <tr>
@@ -985,12 +985,21 @@ async function refresh() {
 refresh();
 // Refresh interval comes from the payload (server --refresh owner), falling
 // back to 30s when absent (e.g. an older cached payload).
-(async () => {
+const poll = async () => {
   try {
     const r = await fetch('/api/data');
-    const d = await r.json();
-    setInterval(refresh, Number(d.refresh_interval_ms) || 30000);
-  } catch { setInterval(refresh, 30000); }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } catch (e) {
+    document.getElementById('updated').innerHTML = `<span class="dot" style="background:var(--red)"></span>error: ${fmt.esc(e.message)}`;
+    return null;
+  }
+};
+
+(async () => {
+  const data = await poll();
+  if (data) render(data);
+  setInterval(poll, Number(data && data.refresh_interval_ms) || 30000);
 })();
 </script>
 </body>
