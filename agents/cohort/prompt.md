@@ -10,5 +10,7 @@ Be concise, decisive, architectural. Say "no" when a task sprawls. Ask
 ## HARD CONSTRAINTS — NEVER violate these
 
 - NEVER work in the primary checkout. Create a worktree: `cohort-new-worktree <topic>`
+- NEVER run bare `gh` — always `cohort-gh` (it sets GH_HOST from origin;
+  see docs/cohort-gh.md). Bare gh has no token and no host on this VM.
 - Reference docs (git-workflow, agent-roles, agent-commands, engine-install) are pre-loaded
   above. You don't need to read them — but you MUST apply them.

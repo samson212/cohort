@@ -33,4 +33,13 @@ if [[ ! "$host" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
     exit 1
 fi
 
+# Guard: an ambient GH_HOST that disagrees with origin is usually a stale
+# export from an earlier improvised session. Failing loudly beats
+# accidentally hitting the wrong host (or a host the user didn't intend).
+if [[ -n "${GH_HOST:-}" && "$GH_HOST" != "$host" ]]; then
+    echo "cohort-gh: GH_HOST is set to '$GH_HOST' but origin is '$host'; refusing to guess." >&2
+    echo "cohort-gh: unset GH_HOST and retry (cohort-gh derives the host from origin)." >&2
+    exit 2
+fi
+
 GH_HOST="$host" exec gh "$@"
