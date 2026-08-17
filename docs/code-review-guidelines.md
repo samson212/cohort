@@ -171,6 +171,48 @@ script that does one job clearly beats three Python scripts with
 duplicated boilerplate, regardless of whether any of them could have
 been sed or jq.
 
+## Ask whether an earlier point in the pipeline already knows the answer
+
+When you see a piece of config, a template, or a parameterized value
+that needs a "render" or "substitution" step to be usable, stop and ask:
+where does the final value actually first become known, and is that
+point an *earlier step in this same execution*? If so, generate the
+concrete thing there instead of shipping a placeholder that some later
+program must rewrite.
+
+Symptoms that this applies:
+
+- A template whose placeholders (`%u`, `%h`, `${USER}`, a config key)
+  can never be resolved by the tool that reads them, so a *separate*
+  script must string-substitute them before use — with escaping, empty
+  guards, and "which user" logic for every possible invocation.
+- The values being substituted are already known to the very installer
+  that would do the substitution — e.g. an install script that knows
+  `$HOME`/`$USER` but renders a unit with `User=%u`, then later resolves
+  `%u` back to the same user it already had.
+- A committed template file whose only consumer is a post-processor
+  that makes it correct. The file doesn't run standalone; it's a broken
+target waiting to be patched.
+
+The fix is usually **deletion of the indirection**: write the literal
+value at the point where it's known, and delete the placeholder + the
+renderer. Concrete example: a systemd unit shipped as `bin/*.service`
+with `User=%u`/`%h`, which systemd resolves to *root* for a system
+unit — so install.sh had to sed-substitute the real user/home, escape
+`&/\` in sed delimiters, guard against empty renders, and re-derive the
+user from `SUDO_USER`/`id`. But install.sh had `$HOME`/`$USER` at the
+top of the script. The whole template+escape+guard machinery existed
+only to express "the user I already am." Generating the unit inline
+from `$DASH_USER`/`$DASH_HOME` and deleting the committed template
+removed the entire category.
+
+Caveat: this is not an argument against all templating. The check is
+whether the *consumer* can resolve the placeholder itself. If the
+tool reading the config naturally expands it (shell `${VAR:-}`,
+openssl envsubst, systemd's own specifiers where they resolve
+correctly), the placeholder is fine. The target is a placeholder that
+is *guaranteed wrong* until an unrelated program rewrites it.
+
 ## Try an alternative-approaches pass
 
 After the first findings pass, step back and ask: is there a

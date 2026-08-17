@@ -59,12 +59,12 @@ Then, from any project root:
 cohort-init
 ```
 
-The installer also sets up the **dashboard service**: `install.sh` renders
-`bin/cohort-dashboard.service` with the invoking user's real user/home
-(all `%u`/`%h` placeholders are substituted — systemd would otherwise
-resolve them to root) and installs + starts it via systemd when root or
-passwordless sudo is available. If neither is, it writes the rendered
-unit to `~/.cohort-dashboard.service` and prints manual install steps.
+The installer also sets up the **dashboard service**: `install.sh` writes
+the unit directly from the invoking user's real user/home (no committed
+template, no `%u`/`%h` placeholders — systemd would resolve those to
+root for a system unit) and installs + starts it via systemd when root
+or passwordless sudo is available. If neither is, it writes the unit to
+`~/.cohort-dashboard.service` and prints manual install steps.
 The dashboard then serves on port 6283 (`http://localhost:6283/`;
 on exe.dev, `https://<vm>.exe.xyz:6283/`).
 

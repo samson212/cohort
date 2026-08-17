@@ -103,20 +103,19 @@ would get the scripts but no running dashboard.
 
 ## install.sh now installs the service
 
-Commit `c03fb90`. After cloning/updating, install.sh:
+Commit `c03fb90` introduced the service install; a later commit removed
+the placeholder template entirely. After cloning/updating, install.sh:
 
-- Renders `bin/cohort-dashboard.service` with the **real** target
-  user/home. The unit uses `%u`/`%h` as a portable template, but systemd
-  resolves those to **root** for a system unit (verified: a scratch unit
-  loaded as `User=root`, `ExecStart=/root/.cohort/...`). Materializing at
-  install time avoids the dashboard scraping `/root` instead of the user
-  HOME.
+- **Generates** the unit at install time from the real target user/home
+  (a follow-up simplification: there is no `%u`/`%h` template file — the
+  values install.sh already knows are written literally). The older
+  approach materialized a placeholder template with sed, which needed
+  escaping and guards and still shipped a unit that couldn't run until a
+  second program rewrote it.
 - Honours `SUDO_USER` when run via sudo; falls back to the invoking user.
 - Three paths: root → install + start; passwordless sudo → install + start;
   no privileges → write rendered unit to `~/.cohort-dashboard.service`
   and print manual steps.
-- Guards against rendering an empty `User=`/`HOME=` and escapes sed
-  delimiters in substituted values.
 
 Docs updated to match (`dashboard-design.md` deployment section,
 `engine-install.md` bootstrap).
@@ -129,19 +128,18 @@ Docs updated to match (`dashboard-design.md` deployment section,
 - The live install still runs the **dev drop-in**
   (`/etc/systemd/system/cohort-dashboard.service.d/devpath.conf`),
   pointing at this worktree's `bin/`. That is the intended dev override.
-- install.sh's new service step reads
-  `$ENGINE_DIR/bin/cohort-dashboard.service` — which only exists after
-  this branch merges to `main` (the primary checkout is on `main` and
-  doesn't have the dashboard files yet). So the fresh-machine promise
-  activates on merge.
+- install.sh generates the unit inline (no template file to be missing),
+  so the fresh-machine promise activates on merge — every installer runs
+  install.sh itself.
 - **Recommended post-merge cleanup:** remove the `devpath.conf` drop-in,
-  re-run `install.sh` (renders the modern unit: `exedev`, port 6283,
+  re-run `install.sh` (writes the modern unit: `exedev`, port 6283,
   stable `~/.cohort/bin` path), and `systemctl enable --now
   cohort-dashboard`. That reproduces exactly what a fresh machine gets.
 
 ## Files touched on this branch
 
 `bin/cohort-dashboard`, `bin/cohort-dashboard-pr`, `bin/cohort-dashboard-prep`,
-`bin/cohort-dashboard.service`, `bin/cohort-init`, `docs/dashboard-design.md`,
-`docs/engine-install.md`, `install.sh` (plus earlier dashboard work already
-on the branch).
+`bin/cohort-init`, `docs/dashboard-design.md`, `docs/engine-install.md`,
+`install.sh` (plus earlier dashboard work already on the branch). The
+committed `bin/cohort-dashboard.service` template was removed — install.sh
+generates the unit from install-time-known values instead.
