@@ -9,7 +9,7 @@ projects via a thin `.cohort/` directory.
 ~/cohort/                   # clone the engine here (visible, editable)
 ~/.cohort -> ~/cohort       # symlink — canonical path for tooling
 ~/cohort/
-  bin/                      # scripts (add ~/.cohort/bin to PATH)
+  bin/                      # scripts (add ~/.cohort/bin to PATH: cohort-gh, cohort-new-worktree, …)
   agents/cohort/            # universal prompt.md + symlinked docs
   docs/                     # canonical docs
   commands/                 # slash command prompts

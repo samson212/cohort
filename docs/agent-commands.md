@@ -12,3 +12,8 @@ so it never drifts from the source.
 | `/cohort-sync` | `commands/cohort-sync.md` | Fetch, show commits, push, display result |
 | `/cohort-pr` | `commands/cohort-pr.md` | Create draft PR or update description for the current branch |
 | `/cohort-cleanup` | `commands/cohort-cleanup.md` | Check unresolved comments, hand off merge, clean up worktree/branch, update main |
+
+`cohort-gh` (in `bin/`) is the sanctioned way to run the GitHub CLI on
+this VM. `docs/cohort-gh.md` explains the exe.dev integration model —
+no token on the VM, edge-injected auth, 403s on unproxied paths are
+expected — and why bare `gh` does not work without it.
