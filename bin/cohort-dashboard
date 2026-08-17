@@ -551,11 +551,12 @@ def sort_groups(repo):
 def status_after_reconcile(entry):
     """Reclassify a worktree's status once live-remote truth is known.
 
-    prep's status only knows what local git refs say: a clean branch whose
-    remote-tracking ref lingers (merged PR, branch deleted upstream) is
-    tagged "idle" even though its GitHub page is gone, and a never-pushed
-    branch is "noupstream". Now that on_remote/deleted reflect reality,
-    tighten the labels so the pill says what's actually true:
+    collect_git's status only knows what local git refs say: a clean
+    branch whose remote-tracking ref lingers (merged PR, branch deleted
+    upstream) is tagged "idle" even though its GitHub page is gone, and a
+    never-pushed branch is "noupstream". Now that on_remote/deleted
+    reflect reality, tighten the labels so the pill says what's actually
+    true:
 
       dirty       uncommitted changes (unchanged)
       unpushed    ahead of upstream (unchanged)

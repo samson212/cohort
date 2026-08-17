@@ -9,7 +9,7 @@ Goal: 1,262 → ~560 LOC, 60 → ~10 git spawns/repo, 3 processes → 1, one
 - 🔄 in progress
 - ⬜ not started
 
-## Done so far (branch `agent/dashboard`)
+## Done (branch `agent/dashboard`)
 
 - ✅ **One branch record, one `for-each-ref`** (`c14ef82`)
   - Collapsed 8 collectors into two passes: heads (name/upstream/oid/
@@ -25,72 +25,91 @@ Goal: 1,262 → ~560 LOC, 60 → ~10 git spawns/repo, 3 processes → 1, one
     drop). NUL separator must be written as `%00` (literal NUL breaks argv).
 - ✅ Committed reviews: `2055a8c` (`REVIEW.md` + `REVIEW-02.md`).
 
-## Remaining, ranked by (complexity removed ÷ risk)
+- ✅ **Delete `no_gh` + client-side sort mirror** (`72b547b`)
+  - `no_gh` query param, cache bucket, `_no_gh` fields — all gone (no caller).
+  - Deleted JS `recencyBand`/`rowUrgency`/`urgencyCmp` + "must mirror
+    urgency_key" comments; server's `sort_groups` is the only owner.
+  - Design doc: removed no_gh section + client-mirror paragraph; page
+    renders payload order.
+  - −90 net lines (file 498 → ~490 before merge; net with other files).
 
-1. ⬜ **Delete `no_gh` + client-side sort mirror** — −95 LOC, risk ≈ 0
-   - `no_gh` query param, cache bucket, `_no_gh` fields; broken (unmapped
-     status pills, mirror-host links) with no caller.
-   - Delete JS `recencyBand`/`rowUrgency`/`urgencyCmp` + the "must mirror
-     urgency_key" comments: server's `sort_groups` becomes the only owner.
-   - Update `docs/dashboard-design.md` (remove no_gh section, row-ordering
-     "client mirror" note).
+- ✅ **Merge three scripts into one** (`a545dff`)
+  - `cohort-dashboard-prep` + `cohort-dashboard-pr` + `cohort-dashboard`
+    → one `bin/cohort-dashboard` with `collect_git()`/`collect_gh()`/
+    `serve()`. Killed duplicated `run()`/`gh()`, two docstrings/imports,
+    JSON re-serialize/re-parse round trip, `pr_enriched` protocol.
+  - `--json-only [--repos FILE]` keeps the collection half standalone
+    (the independently-testable boundary, 3 lines instead of 3 processes).
+  - install.sh ExecStart now runs the single binary (was already the
+    case for the server half).
+  - Behavior verified: payload byte-identical to golden (minus timestamps,
+    in-worktree dirty counts, and the new commit SHA).
 
-2. ⬜ **Merge three scripts into one** — −90 LOC, −2 files, risk low
-   - `cohort-dashboard-prep` + `cohort-dashboard-pr` +
-     `cohort-dashboard` → one file with `collect_git()`/`collect_gh()`/
-     `serve()`. Kills duplicated `run()`/`gh()`, two docstrings/imports,
-     JSON re-serialize/re-parse round trip, `pr_enriched` protocol.
-   - `install.sh` ExecStart + `cohort-init` --dashboard-port references
-     must follow the rename.
-   - "Independently testable" justification is unbacked (zero tests);
-     add `--json-only` (3 lines) if the boundary is wanted back.
+- ✅ **Ship a static systemd *user* unit** (`a545dff`)
+  - `bin/cohort-dashboard.service` with `%h` — resolves to the owner's
+    home in a user manager (verified live on this VM on port 6411).
+  - install.sh: removed the entire generated-unit machinery (heredoc,
+    SUDO_USER derivation, blank-value guards, three-branch ladder);
+    now copies the static unit, `loginctl enable-linger`, `--user enable
+    --now`, then verifies `curl /healthz`.
+  - Fixes port-ownership (REVIEW.md #1) for free; no root needed.
 
-3. ⬜ **Ship a static systemd *user* unit** — −35 LOC, risk low-med
-   - `%h` verified to resolve correctly in a user unit; removes the entire
-     generated-unit machinery in `install.sh` (heredoc, SUDO_USER
-     derivation, blank-value guards, three-branch root/sudo/no-privilege
-     ladder ~57 lines) and fixes port-ownership (REVIEW.md #1) for free.
-   - Needs `loginctl enable-linger` (already enabled on this VM).
+- ✅ **Dead `pr_*` enrichment fields** (`a072c67`) — partial Task 4
+  - `enrich()` writes only the 4 fields the page reads (`pr_number`,
+    `pr_state`, `pr_draft`, `pr_url`).
+  - gh `pr list` stops requesting `baseRefName`/`reviewDecision`/
+    `headRefOid`; keeps the Open-PRs-table fields (`createdAt`,
+    `updatedAt`, `mergeable`, `additions`, `deletions`).
+  - ⏳ Still open from Task 4 (product call, not done): cut
+    `remote_only` and/or the Open-PRs table (visible feature removal).
 
-4. ⬜ **Cut `remote_only`, Open-PRs table, 9 dead `pr_*` fields** —
-   −60 to −110 LOC, risk low but product call
-   - Page reads 5 of 13 `pr_*` fields (`pr_number`, `pr_state`, `pr_draft`,
-     `pr_title`, `pr_url`): drop `baseRefName`, `reviewDecision`,
-     `headRefOid` + enrichment of unread fields, plus `additions`/
-     `deletions`/`mergeable` unless Open-PRs table stays. Confirmed unread
-     repo-wide.
-   - Is the "Open pull requests" table worth its ~50 lines? It duplicates
-     the per-worktree PR column.
+- ✅ **Bind 127.0.0.1 default (`--bind` opt-in)** (`a545dff`)
+  - Was `0.0.0.0` no auth, enabled unconditionally. Now loopback by
+    default; the exe.dev proxy still reaches it.
 
-5. ⬜ **Small correctness/safety (do regardless, before merge)**
-   - Bind `127.0.0.1` (explicit `--bind` opt-in); install-should prompt.
-     Currently `0.0.0.0` no auth, enabled unconditionally.
-   - Verify install via `curl /healthz` after `enable --now` — "verify
-     after mutation" / "exit codes lie".
-   - `orphan_branches` hardcodes `"main"` (prep:288 in old file): now
-     excluded by `br == db` — confirm no master-default orphan regression
-     (golden-verified for fallback "main"; `default_branch` still falls
-     back to "main" when origin/HEAD absent — acceptable, matches old).
-   - Delete dead schema `host_of_remote`/`repo.host` (no consumer) — never
-     ported into the new prep; confirm absence.
-   - Refresh interval has 4 owners (`DEFAULT_REFRESH`, unit `--refresh`,
-     page `setInterval(30000)`, footer "30s"): serve it in payload.
+- ✅ **Verify install via `/healthz`** (`a545dff`) — "verify after
+  mutation": after `enable --now`, curl `/healthz`; report failure loudly.
 
-6. ⬜ **Docs sweep**
-   - `docs/dashboard-incident.md` (145 lines): keep only the durable lesson
-     (root-relative URLs only, never `<base href>`), fold as two-line note
-     into design doc, delete file.
-   - Design doc status table: single vocabulary, one place; prep docstring
-     contract (`new`/`noupstream`/`idle`) vs real set
-     (`dirty|unpushed|deleted|up to date|local`) already disagree.
-   - Keep this file current as each task lands.
+- ✅ **Orphan master-default** — confirmed excluded by `br == db` in
+  `collect_git` (no master-default orphan regression).
 
-## Carry-over context for the next session
+- ✅ **Delete dead schema `host_of_remote`/`repo.host`** — confirmed
+  absent (never ported into the merged prep; no `repo.host` emitted).
 
-- Golden payloads used for verification: prep-only and full (prep|pr)
-  captured from the pre-refactor build. Rebuild after each structural
-  change and diff (exclude `generated_at`, `collected_at`,
-  `days_since_last_commit`, dirty counts while editing in this worktree).
+- ✅ **Refresh interval one owner** (`07ea365`)
+  - Payload serves `refresh_interval_ms`; page `setInterval` and footer
+    both read it (fallback 30s). Four owners → one.
+
+- ✅ **Docs sweep** (`a545dff`, `07ea365`, current commit)
+  - Deleted `docs/dashboard-incident.md`; durable lesson (root-relative
+    URLs only, never `<base href>`) folded into design doc as a
+    two-line note.
+  - Design doc: single status vocabulary (the `dirty|unpushed|deleted|
+    up to date|local` set; `collect_git`'s `new`/`noupstream`/`idle`
+    are intermediate, reclassified by `status_after_reconcile`);
+    `status_after_reconcile` docstring updated to `collect_git`.
+  - Deployment section: user-unit model; component section: one script
+    one process; pipeline diagrams updated.
+
+## Remaining
+
+- 🔄 **Task 4 (product call): cut `remote_only` + Open-PRs table**
+  - The "Open pull requests" table (~50 lines + 5 gh fields) duplicates
+    the per-worktree PR column; `remote_only` section (~40 lines) is the
+    same data as merged/closed PR history.
+  - **Decision needed from the user** — both are visible UI features.
+  - If removed: delete JS `prRow`/`prCmp`, the `pr_*` Open-PRs fields
+    additions/deletions/mergeable/createdAt/updatedAt/title/headRefName
+    from the gh request, and the `remote_only` collection + renderer.
+
+## Carry-over context
+
+- Golden payloads: prep-only and full (prep|pr) captured from the
+  pre-refactor build; now superseded by the single binary's
+  `--json-only`. For future structural changes, diff `--json-only`
+  output against a freshly captured baseline (exclude `generated_at`,
+  `collected_at`, `refresh_interval_ms`, `days_since_last_commit`, and
+  dirty counts while editing in this worktree).
 - `%(ahead-behind:origin/DB)` placeholder is replaced with the real
   default branch inside `for_each_ref`; when the default ref is missing
   the atom is dropped from the format (whole call would fatal).

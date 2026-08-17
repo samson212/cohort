@@ -22,7 +22,10 @@ the browser loaded the page from, so the same server works unchanged
 behind any proxy — same host, different port, localhost, or a custom
 domain. A hardcoded `<base href>` would point the fetch at a fixed
 origin and break every other entry point (e.g. a proxy that maps a
-non-default port). The config file therefore holds only the port.
+non-default port). **A `<base href>` injection at a fixed origin caused
+a real outage** (the page loaded but `/api/data` fetched the wrong
+origin and the browser blocked it) — root-relative URLs only, never a
+`<base href>`. The config file therefore holds only the port.
 
 This document captures the current design. It is the source of truth for
 how the pieces fit; the code in `bin/` is the implementation.
