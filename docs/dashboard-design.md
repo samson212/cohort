@@ -217,8 +217,12 @@ Restart=on-failure
 RestartSec=3
 ```
 
-- Uses `%u`/`%h` so the same file works on any machine — no hardcoded
-  usernames or paths.
+- The unit uses `%u`/`%h` as a **template** — install.sh materializes them
+  to the real target user/home before installing into systemd (systemd
+  itself would resolve `%u`/`%h` to root for a system unit, which is
+  never what you want). The installed unit at
+  `/etc/systemd/system/cohort-dashboard.service` therefore has concrete
+  `User=`/`Environment=HOME=` values.
 - `PATH` includes `~/.cohort/bin` so `cohort-gh` (a sibling in the same
   bin) is found.
 - Port 6283 is the default (an unused high-number port; see "Port
@@ -228,9 +232,10 @@ RestartSec=3
   auto-refreshes client-side on a fixed 30s timer.
 - The deployed script is the engine's `~/.cohort/bin/cohort-dashboard`
   (a symlink to the primary checkout's `bin/`), so the unit's intention is
-  the stable path. During development it may be overridden with a drop-in
-  pointing `ExecStart` at a worktree's copy — that override is temporary
-  and should be removed once the branch merges.
+  the stable path. `install.sh` installs and starts this unit. During
+  development it may be overridden with a drop-in pointing `ExecStart`
+  at a worktree's copy — that override is temporary and should be removed
+  once the branch merges.
 
 ### Port selection
 
