@@ -216,7 +216,7 @@ Type=simple
 User=<user>
 Environment=HOME=<home>
 Environment=PATH=<home>/.cohort/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=<home>/.cohort/bin/cohort-dashboard --port 6283 --refresh 30
+ExecStart=<home>/.cohort/bin/cohort-dashboard --refresh 30
 Restart=on-failure
 RestartSec=3
 
@@ -233,8 +233,9 @@ WantedBy=multi-user.target
 - `PATH` includes `<home>/.cohort/bin` so `cohort-gh` (a sibling in the
   same bin) is found.
 - Port 6283 is the default (an unused high-number port; see "Port
-  selection" below). On an exe.dev VM, expose it through the proxy:
-  `ssh exe.dev share port <vm> 6283`.
+  selection" below). The unit deliberately passes no `--port` so the
+  config file keeps authority. On an exe.dev VM, expose it through the
+  proxy: `ssh exe.dev share port <vm> 6283`.
 - `--refresh` is the server-side cache TTL (default 30s); the page also
   auto-refreshes client-side on a fixed 30s timer.
 - The deployed script lives in `~/.cohort/bin/` (a symlink to the primary
@@ -250,9 +251,19 @@ The default port is **6283** — a high, unassigned port (τ × 1000, rounded)
 just `e^3`, a nod to Euler's number). It is unlikely to collide with any
 common service. Override with `--port` at any level:
 
-- In the server: `cohort-dashboard --port 9999`
-- In the systemd unit: change `ExecStart=`
-- At init time: `cohort-init --dashboard-port 9999` writes the config
+- In the server: `cohort-dashboard --port 9999` (highest priority)
+- For the systemd unit: run `cohort-init --dashboard-port 9999`, which
+  writes the config the server reads
+
+If the unit itself needs a one-off different port without touching the
+config, add a drop-in:
+
+```
+sudo systemctl edit cohort-dashboard
+#   [Service]
+#   ExecStart=
+#   ExecStart=/home/<user>/.cohort/bin/cohort-dashboard --refresh 30 --port 9999
+```
 
 ### Config file
 
@@ -265,8 +276,10 @@ the port:
 }
 ```
 
-The systemd unit's `--port` flag overrides it; the default is 6283 when
-neither is set. There is no domain field — see "Why no domain" above.
+The server reads the port in this order: the `--port` CLI flag, then the
+config file, then the 6283 default. The unit does not pass `--port`, so
+`cohort-init --dashboard-port` controls the installed service. There is
+no domain field — see "Why no domain" above.
 
 ## Failure handling
 

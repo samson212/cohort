@@ -81,6 +81,11 @@ echo "Done. From any project root, run:  cohort-init"
 # the repo cost sed escaping, empty-value guards, and still resolved to
 # root if systemd ever touched it.) The dashboard aggregates the user's
 # worktrees and must run as that user.
+#
+# The port is deliberately not pinned here: cohort-dashboard reads
+# ~/.config/cohort-dashboard/config (written by cohort-init
+# --dashboard-port) and falls back to 6283 when nothing is supplied — an
+# explicit --port in this unit would silently override that config.
 if command -v systemctl >/dev/null 2>&1; then
     if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
         DASH_USER="$SUDO_USER"
@@ -108,7 +113,7 @@ Type=simple
 User=$DASH_USER
 Environment=HOME=$DASH_HOME
 Environment=PATH=$DASH_BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=$DASH_BIN/cohort-dashboard --port 6283 --refresh 30
+ExecStart=$DASH_BIN/cohort-dashboard --refresh 30
 Restart=on-failure
 RestartSec=3
 
