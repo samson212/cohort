@@ -36,6 +36,10 @@ Writes JSON to stdout:
 
 Everything here is local git reads — no network, no gh. PR enrichment is the
 server half's job (network calls are slow and can fail; git reads aren't).
+
+The git collection core is a single `for-each-ref` per ref namespace (heads,
+remotes/origin) plus one `status` and one upstream left-right per worktree —
+about 10 subprocess calls per repo instead of one per fact.
 """
 
 import json
@@ -46,6 +50,18 @@ import sys
 from datetime import datetime, timezone
 
 CONFIG_FILE = os.path.expanduser("~/.config/cohort-dashboard/repos")
+
+
+HEAD_ATOMS = (
+    "%(refname:short)", "%(upstream:short)", "%(objectname)",
+    "%(committerdate:iso8601-strict)", "%(subject)", "%(worktreepath)",
+    "%(ahead-behind:origin/DB)",
+)
+REMOTE_ATOMS = (
+    "%(refname)", "%(refname:short)", "%(objectname)", "%(symref)",
+    "%(committerdate:iso8601-strict)", "%(subject)",
+    "%(ahead-behind:origin/DB)",
+)
 
 
 def run(args, cwd=None):
@@ -75,29 +91,20 @@ def find_git_roots(start, max_depth=3):
     for root, dirs, files in os.walk(start):
         depth = root.count(os.sep) - base_depth
         is_repo = ".git" in dirs or ".git" in files
-        # prune very deep / foreign dirs (but never .git itself
-        # before the repo check above has seen it)
         dirs[:] = [d for d in dirs
                    if not d.startswith(".") or d == ".git"
                    if d not in ("node_modules", "target", "vendor", "Library", "Applications")]
         if is_repo:
             found.append(os.path.abspath(root))
-            dirs[:] = []  # don't descend further into a repo
+            dirs[:] = []
             continue
         if depth >= max_depth:
             dirs[:] = []
-    # de-dup preserving order
     return list(dict.fromkeys(found))
 
 
 def discover_repos():
-    """Repos to scan: --repos FILE > config file > auto-discover.
-
-    Auto-discovery walks $HOME a few levels looking for git roots — this
-    catches ~/cohort (the engine), any project directory, and every worktree
-    under ~/worktrees/. Repos are de-duplicated by their actual git root
-    (all worktrees of one project report the same toplevel).
-    """
+    """Repos to scan: --repos FILE > config file > auto-discover."""
     explicit = None
     if len(sys.argv) > 1 and sys.argv[1] == "--repos":
         explicit = sys.argv[2]
@@ -127,7 +134,6 @@ def git_common_root_of(path):
     if rc != 0 or not out:
         return None
     common = os.path.abspath(os.path.join(path, out))
-    # If common dir is a .git file, resolve its gitdir target.
     if os.path.isfile(common):
         try:
             with open(common) as fh:
@@ -137,10 +143,8 @@ def git_common_root_of(path):
                         break
         except OSError:
             pass
-    # Primary checkout root = parent of the common git dir.
     if os.path.basename(common.rstrip(os.sep)).endswith(".git"):
         return os.path.dirname(common.rstrip(os.sep))
-    # A standalone repo: common dir is not .git's parent — use toplevel.
     tl = git_root_of(path)
     return tl
 
@@ -150,24 +154,8 @@ def git_root_of(path):
     return out if rc == 0 else None
 
 
-def host_of_remote(url):
-    if not url:
-        return ""
-    host = url.split("//", 1)[-1]  # strip scheme
-    host = host.split("@", 1)[-1]  # strip user@
-    host = host.split("$", 1)[0].split(":", 1)[0].split("/", 1)[0]  # scp-style: [host:]path
-    return host
-
-
 def web_url_of_remote(url):
-    """Base web URL (https) for a git remote, or "" if it's not https-able.
-
-    Handles the forms git uses on this VM:
-      https://host/owner/repo.git       -> https://host/owner/repo
-      ssh://git@host/owner/repo.git     -> https://host/owner/repo
-      git@host:owner/repo.git           -> https://host/owner/repo
-    A host that isn't a well-formed FQDN (e.g. a path) gets "".
-    """
+    """Base web URL (https) for a git remote, or "" if it's not https-able."""
     if not url:
         return ""
     m = re.match(r"^(?:git@|https?://|ssh://)(?:[^@/]+@)?([^:/]+)[:/](.+?)(?:\.git)?$", url)
@@ -189,24 +177,28 @@ def default_branch(cwd):
     return "main"
 
 
-def worktrees(cwd):
-    """Parse `git worktree list --porcelain` into [{"path","branch","head"}]."""
-    rc, out, _ = run(["git", "-C", cwd, "worktree", "list", "--porcelain"])
-    if rc != 0:
+def for_each_ref(cwd, refs, atoms, default):
+    """Run one for-each-ref with the given atoms, returning parsed rows.
+
+    Fields are separated by `%00` (a real NUL in output, a text placeholder
+    in argv — git translates it). One record per line; the trailing field
+    carries the newline. Callers that need the default-relative comparison
+    pass atoms containing `%(ahead-behind:origin/DB)`, replaced here with
+    the actual default branch.
+    """
+    fmt = "%00".join(atoms)
+    fmt = fmt.replace("origin/DB", f"origin/{default}")
+    rc, out, _ = run(["git", "-C", cwd, "for-each-ref", "--format", fmt, refs])
+    if rc != 0 or not out:
         return []
-    wts, cur = [], {}
+    n = len(atoms)
+    rows = []
     for line in out.splitlines():
-        if line.startswith("worktree "):
-            if cur:
-                wts.append(cur)
-            cur = {"path": line[len("worktree "):]}
-        elif line.startswith("branch "):
-            cur["branch"] = line[len("branch "):].replace("refs/heads/", "")
-        elif line.startswith("HEAD "):
-            cur["head"] = line[len("HEAD "):]
-    if cur:
-        wts.append(cur)
-    return wts
+        fields = line.split("\0")
+        if len(fields) != n:
+            continue  # malformed record (e.g. ahead-behind errored)
+        rows.append(fields)
+    return rows
 
 
 def status_counts(path):
@@ -229,141 +221,32 @@ def status_counts(path):
     return (staged, unstaged, untracked)
 
 
-def upstream_map(cwd):
-    """{branch_short: upstream_short} for every local branch, from git itself.
-
-    The docs' --no-track behavior only applies to branches created by
-    cohort-new-worktree; branches may have been created other ways (e.g.
-    agent/cohort-rename above tracks origin/agent/cohort-rename). Resolving
-    this via for-each-ref avoids fragile @{u} syntax that differs across
-    git versions and checkout contexts.
-    """
-    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
-                      "--format=%(refname:short)%09%(upstream:short)", "refs/heads/"])
-    mapping = {}
-    if rc == 0:
-        for line in out.splitlines():
-            if "\t" in line:
-                br, up = line.split("\t", 1)
-                if up:
-                    mapping[br] = up
-    return mapping
+def upstream_ahead_behind(cwd, upstream, branch):
+    """(ahead, behind) of a branch vs its own upstream, via left-right."""
+    out = git(cwd, "rev-list", "--left-right", "--count", f"{upstream}...{branch}")
+    parts = out.split()
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        return int(parts[0]), int(parts[1])
+    return 0, 0
 
 
-def count_commits(cwd, *revs):
-    out = git(cwd, "rev-list", "--count", *revs)
-    return int(out) if out.isdigit() else 0
+def days_since(when):
+    """Days since an ISO timestamp, or None when unparseable."""
+    if not when:
+        return None
+    try:
+        dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
+    except ValueError:
+        return None
 
 
-def branch_info(cwd, branch):
-    info = {}
-    rc, out, _ = run(["git", "-C", cwd, "log", "-1", "--format=%s%x09%cI", branch])
-    if rc == 0 and out:
-        if "\t" in out:
-            subj, when = out.split("\t", 1)
-            info["subject"] = subj
-            info["last_commit_at"] = when
-    return info
-
-
-def orphan_branches(cwd, worktree_map):
-    """Local branches with no worktree and no upstream (or merged ones).
-
-    These are the things Cohort's cleanup is supposed to have removed:
-    branches whose worktree is gone but whose ref lingers, either merged
-    (cleanup candidate) or never-integrated (parked/abandoned work).
-    Tracked branches that still have a remote counterpart are excluded —
-    their remote is the source of truth and they're plenty discoverable.
-    """
-    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
-                      "--format=%(refname:short)\t%(upstream:short)\t%(objectname)", "refs/heads/"])
-    if rc != 0:
-        return []
-    result = []
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 3:
-            continue
-        br, up, oid = parts[0], parts[1], parts[2]
-        if br in worktree_map or br == "main":
-            continue
-        result.append({"branch": br, "upstream_ref": up,
-                       "head": oid, "head_short": oid[:12]})
-    return result
-
-
-def branch_is_merged_into(cwd, branch, base):
-    rc, _, _ = run(["git", "-C", cwd, "merge-base", "--is-ancestor", branch, base])
-    return rc == 0
-
-
-def remote_branch_set(cwd):
-    """Set of branch names that exist on origin (refs/remotes/origin/*).
-
-    Branches that only exist locally (never pushed, or deleted upstream)
-    have no corresponding remote ref — linking them to a /tree page 404s.
-    """
-    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
-                      "--format=%(refname:short)", "refs/remotes/origin/"])
-    names = set()
-    if rc == 0:
-        for line in out.splitlines():
-            br = line.removeprefix("origin/")
-            if br and br != "HEAD":
-                names.add(br)
-    return names
-
-
-def remote_only_branches(cwd, default):
-    """Remote-tracking branches with no local branch and no worktree.
-
-    These are merged PR heads whose local branch was cleaned up after merge
-    (or pre-existing remote branches nobody has checked out). They never
-    show up in `git worktree list`, so they need their own list — otherwise
-    they're invisible: no local branch, no worktree, just a ref on origin.
-    """
-    rc, out, _ = run(["git", "-C", cwd, "for-each-ref",
-                      "--format=%(refname)\t%(refname:short)\t%(objectname)\t%(symref)",
-                      "refs/remotes/origin/"])
-    result = []
-    if rc != 0:
-        return result
-    # Local branch names (worktree + orphan alike) — remote-only means none
-    # of these exist locally.
-    lrc, lout, _ = run(["git", "-C", cwd, "for-each-ref",
-                        "--format=%(refname:short)", "refs/heads/"])
-    local = set(lout.splitlines()) if lrc == 0 else set()
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 4:
-            continue
-        full, ref, oid, sym = parts
-        # refs/remotes/origin itself is a prefix marker/symref, not a branch
-        if full.rstrip("/") == "refs/remotes/origin":
-            continue
-        if sym:  # symbolic refs (origin/HEAD) aren't branches
-            continue
-        br = ref.removeprefix("origin/")
-        if br == "HEAD" or br == default or br.startswith("pr/"):
-            continue
-        if br in local:
-            continue
-        item = {"branch": br, "head": oid, "head_short": oid[:12]}
-        item["merged"] = branch_is_merged_into(cwd, f"origin/{br}", f"origin/{default}")
-        item["commits_since_default"] = count_commits(cwd, f"origin/{default}..origin/{br}")
-        item.update(branch_info(cwd, f"origin/{br}"))
-        when = item.get("last_commit_at")
-        if when:
-            try:
-                dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
-                item["days_since_last_commit"] = round(
-                    (datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
-            except ValueError:
-                item["days_since_last_commit"] = None
-        else:
-            item["days_since_last_commit"] = None
-        result.append(item)
-    return result
+def parse_ahead_behind(raw):
+    """(ahead, behind) from a `%(ahead-behind:ref)` field ("21 0")."""
+    parts = (raw or "").strip().split()
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    return int(parts[0]), int(parts[1])
 
 
 def scan_repo(root):
@@ -379,65 +262,113 @@ def scan_repo(root):
     entry["root"] = toplevel
     entry["name"] = os.path.basename(toplevel)
     entry["remote"] = git(toplevel, "remote", "get-url", "origin")
-    entry["host"] = host_of_remote(entry["remote"])
     entry["web"] = web_url_of_remote(entry["remote"])
     db = entry["default_branch"] = default_branch(toplevel)
-    ups = upstream_map(toplevel)
-    remote_names = remote_branch_set(toplevel)
+
+    has_default = run(["git", "-C", toplevel, "show-ref", "--verify", "--quiet",
+                      f"refs/remotes/origin/{db}"])[0] == 0
+    # When the default ref is missing (empty clone, no origin), the
+    # ahead-behind atom would fail the whole call — drop it entirely.
+    head_atoms = [a for a in HEAD_ATOMS
+                  if a != "%(ahead-behind:origin/DB)" or has_default]
+    head_rows = for_each_ref(toplevel, "refs/heads/", head_atoms, db)
+    heads = {}
+    for row in head_rows:
+        branch = row[0]
+        heads[branch] = {
+            "branch": branch,
+            "upstream_ref": row[1] or "",
+            "head": row[2],
+            "head_short": row[2][:12],
+            "last_commit_at": row[3] or "",
+            "subject": row[4] or "",
+            "worktree": row[5] or "",
+        }
+        if has_default and len(row) > 6:
+            ab = parse_ahead_behind(row[6])
+            if ab:
+                heads[branch]["vs_default"] = ab
+
+    def default_rel(branch_data):
+        ab = branch_data.get("vs_default")
+        if ab is None:
+            return (None, False)  # no default ref to compare against
+        return (ab[0], ab[0] == 0)  # (commits_since_default, merged)
+
+    # Remote-tracking branches — the remote_only set.
+    remote_atoms = [a.replace("origin/DB", f"origin/{db}")
+                    for a in REMOTE_ATOMS
+                    if not a.startswith("%(ahead-behind") or has_default]
+    remote_rows = for_each_ref(toplevel, "refs/remotes/origin/", remote_atoms, db)
+    remote_names = set()
+    remote_only = []
+    local_names = set(heads)
+    for row in remote_rows:
+        full, ref, oid = row[0], row[1], row[2]
+        sym = row[3]
+        if full.rstrip("/") == "refs/remotes/origin":
+            continue
+        if sym:
+            continue
+        br = ref.removeprefix("origin/")
+        if br == "HEAD" or br.startswith("pr/"):
+            continue
+        # Every real remote branch counts as "exists on the remote",
+        # including the default branch itself.
+        remote_names.add(br)
+        if br == db or br in local_names:
+            continue
+        item = {"branch": br, "head": oid, "head_short": oid[:12]}
+        if has_default and len(row) > 6:
+            ab = parse_ahead_behind(row[6])
+            item["merged"] = (ab is not None and ab[0] == 0) if ab else False
+            item["commits_since_default"] = ab[0] if ab else 0
+        else:
+            item["merged"] = False
+            item["commits_since_default"] = 0
+        item["subject"] = row[5] or ""
+        item["last_commit_at"] = row[4] or ""
+        item["days_since_last_commit"] = days_since(row[4] or "")
+        remote_only.append(item)
+
     entry["worktrees"] = []
     entry["orphans"] = []
-    entry["remote_only"] = remote_only_branches(toplevel, db)
+    entry["remote_only"] = remote_only
 
     worktree_branches = set()
-    for wt in worktrees(toplevel):
-        branch = wt.get("branch")
-        path = wt.get("path")
-        if not branch or not path:
+    for branch, hd in heads.items():
+        wt_path = hd.get("worktree") or ""
+        if not wt_path:
             continue
         worktree_branches.add(branch)
-
         item = {
-            "path": path,
+            "path": wt_path,
             "branch": branch,
-            "is_primary": path == toplevel,
+            "is_primary": wt_path == toplevel,
             "on_remote": branch in remote_names,
-            "head": wt.get("head", ""),
-            "head_short": (wt.get("head") or "")[:12],
+            "head": hd["head"],
+            "head_short": hd["head_short"],
         }
-        item.update(branch_info(toplevel, branch))
+        item["subject"] = hd["subject"]
+        item["last_commit_at"] = hd["last_commit_at"]
+        item["days_since_last_commit"] = days_since(hd["last_commit_at"])
 
-        staged, unstaged, untracked = status_counts(path)
+        staged, unstaged, untracked = status_counts(wt_path)
         item.update(
             staged=staged, unstaged=unstaged, untracked=untracked,
             dirty_files=staged + unstaged + untracked,
         )
 
-        upstream = ups.get(branch, "")
+        upstream = hd["upstream_ref"]
         item["has_upstream"] = bool(upstream)
         item["upstream_ref"] = upstream
-        ahead = behind = 0
         if upstream:
-            out = git(toplevel, "rev-list", "--left-right", "--count", f"{upstream}...{branch}")
-            parts = out.split()
-            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                ahead, behind = int(parts[0]), int(parts[1])
-        item["ahead"], item["behind"] = ahead, behind
-        item["commits_since_default"] = count_commits(toplevel, f"origin/{db}..{branch}")
-
-        when = item.get("last_commit_at")
-        if when:
-            try:
-                dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
-                item["days_since_last_commit"] = round(
-                    (datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
-            except ValueError:
-                item["days_since_last_commit"] = None
+            item["ahead"], item["behind"] = upstream_ahead_behind(toplevel, upstream, branch)
         else:
-            item["days_since_last_commit"] = None
+            item["ahead"], item["behind"] = 0, 0
+        commits_since_default, _ = default_rel(hd)
+        item["commits_since_default"] = commits_since_default if commits_since_default is not None else 0
 
-        # Classification (local-git only; the pr stage re-derives worktree
-        # status after live-branch reconciliation, so this is a fallback,
-        # not the source of truth)
         if item["dirty_files"]:
             status = "dirty"
         elif not item["has_upstream"]:
@@ -449,23 +380,22 @@ def scan_repo(root):
         item["status"] = status
         entry["worktrees"].append(item)
 
-    for ob in orphan_branches(toplevel, worktree_branches):
-        br = ob["branch"]
-        ob["has_upstream"] = bool(ob.get("upstream_ref"))
-        ob["on_remote"] = br in remote_names
-        ob["merged"] = branch_is_merged_into(toplevel, br, f"origin/{db}")
-        ob["commits_since_default"] = count_commits(toplevel, f"origin/{db}..{br}")
-        ob.update(branch_info(toplevel, br))
-        when = ob.get("last_commit_at")
-        if when:
-            try:
-                dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
-                ob["days_since_last_commit"] = round(
-                    (datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
-            except ValueError:
-                ob["days_since_last_commit"] = None
-        else:
-            ob["days_since_last_commit"] = None
+    for branch, hd in heads.items():
+        if branch in worktree_branches or branch == db:
+            continue
+        ob = {
+            "branch": branch,
+            "upstream_ref": hd["upstream_ref"],
+            "has_upstream": bool(hd["upstream_ref"]),
+            "on_remote": branch in remote_names,
+            "head": hd["head"],
+            "head_short": hd["head_short"],
+        }
+        commits_since_default, merged = default_rel(hd)
+        ob["merged"] = merged
+        ob["commits_since_default"] = commits_since_default if commits_since_default is not None else 0
+        ob.update(subject=hd["subject"], last_commit_at=hd["last_commit_at"])
+        ob["days_since_last_commit"] = days_since(hd["last_commit_at"])
         if not ob["has_upstream"]:
             ob["status"] = "merged" if ob["merged"] else "orphan"
         else:
@@ -477,8 +407,6 @@ def scan_repo(root):
 
 def main():
     repos = discover_repos()
-    # De-duplicate by real git root: a worktree and its primary checkout
-    # both belong to one repo, and walking $HOME finds every worktree.
     seen, unique = set(), []
     for r in repos:
         toplevel = git_common_root_of(r) or git_root_of(r)
