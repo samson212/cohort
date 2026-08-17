@@ -473,7 +473,7 @@ def collect_prs(repo):
             pass
 
     rc, out, err = gh(root, "pr", "list", "--state", "all", "--limit", "100", "--json",
-                      "number,title,state,url,isDraft,headRefName,baseRefName,createdAt,updatedAt,reviewDecision,mergeable,additions,deletions,headRefOid")
+                      "number,title,state,url,isDraft,headRefName,createdAt,updatedAt,mergeable,additions,deletions")
     if rc != 0 or not out:
         return result
     try:
@@ -492,21 +492,11 @@ def collect_prs(repo):
     return result
 
 def enrich(entry, pr):
-    """Attach pr_* fields to a worktree/orphan/remote-only entry."""
-    head = pr.get("headRefOid") or ""
+    """Attach the four pr_* fields the page reads to an entry."""
     entry["pr_number"] = pr.get("number")
     entry["pr_state"] = pr.get("state")
-    entry["pr_title"] = pr.get("title")
-    entry["pr_url"] = pr.get("url")
     entry["pr_draft"] = pr.get("isDraft")
-    entry["pr_created_at"] = pr.get("createdAt")
-    entry["pr_updated_at"] = pr.get("updatedAt")
-    entry["pr_review_decision"] = pr.get("reviewDecision") or ""
-    entry["pr_mergeable"] = pr.get("mergeable") or ""
-    entry["pr_additions"] = pr.get("additions", 0)
-    entry["pr_deletions"] = pr.get("deletions", 0)
-    entry["pr_head_sha"] = head[:12]
-    entry["pr_head_sha_matches"] = bool(head) and entry.get("head_short") == head[:12]
+    entry["pr_url"] = pr.get("url")
 
 def recency_band(days):
     """0,1,2,3 for <1d, <3d, <7d, older — the recency ladder."""

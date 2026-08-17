@@ -122,12 +122,14 @@ One JSON document per scrape:
   "subject": "…", "last_commit_at": "…Z", "days_since_last_commit": 1.2,
   "status": "dirty",           # dirty | unpushed | deleted | up to date | local
   "pr_number": 12, "pr_state": "MERGED", "pr_url": "https://github.com/…/pull/12",
-  "pr_draft": false, "pr_created_at": "…", "pr_updated_at": "…",
-  "pr_review_decision": "APPROVED", "pr_mergeable": "MERGEABLE",
-  "pr_additions": 3, "pr_deletions": 1,
-  "pr_head_sha": "…", "pr_head_sha_matches": true
+  "pr_draft": false
 }
 ```
+
+The per-worktree `pr_*` enrichment is limited to the four fields the page
+reads (`pr_number`, `pr_state`, `pr_draft`, `pr_url`); the Open-PRs table
+gets its richer fields directly from `gh` in `collect_gh`.
+
 
 ### orphan entry
 
