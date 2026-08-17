@@ -72,80 +72,52 @@ fi
 echo ""
 echo "Done. From any project root, run:  cohort-init"
 
-# ── Install the dashboard systemd service ────────────────────────────────
-# The unit is generated here, at install time, from values this script
-# already knows: the invoking user (or SUDO_USER) and their home. No
-# committed template, no placeholders, no substitution pass — a unit for
-# a different user would need a different ExecStart, and install.sh is
-# the only place that knows who that is. (A %u/%h template shipped in
-# the repo cost sed escaping, empty-value guards, and still resolved to
-# root if systemd ever touched it.) The dashboard aggregates the user's
-# worktrees and must run as that user.
+# ── Install the dashboard systemd user service ─────────────────────────
+# A static user unit shipped in the repo (bin/cohort-dashboard.service)
+# uses %h, which in a USER manager resolves to that user's home — the
+# dashboard aggregates the invoking user's worktrees and must run as that
+# user, so a user unit is the right home (a system unit's %u/%h would
+# resolve to root). install.sh only copies the unit, enables linger (user
+# services need it to start at boot), and starts it — no root, no
+# generated paths, no SUDO_USER ladder.
 #
 # The port is deliberately not pinned here: cohort-dashboard reads
 # ~/.config/cohort-dashboard/config (written by cohort-init
 # --dashboard-port) and falls back to 6283 when nothing is supplied — an
 # explicit --port in this unit would silently override that config.
+DASH_UNIT_SRC="$ENGINE_DIR/bin/cohort-dashboard.service"
+DASH_USER_UNIT_DIR="$HOME/.config/systemd/user"
 if command -v systemctl >/dev/null 2>&1; then
-    if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
-        DASH_USER="$SUDO_USER"
-        DASH_HOME="$(getent passwd "$DASH_USER" | cut -d: -f6)"
-    fi
-    DASH_USER="${DASH_USER:-$(id -un)}"
-    DASH_HOME="${DASH_HOME:-$HOME}"
+    mkdir -p "$DASH_USER_UNIT_DIR"
+    cp "$DASH_UNIT_SRC" "$DASH_USER_UNIT_DIR/cohort-dashboard.service"
 
-    # Never write a unit with a blank User/Home.
-    if [[ -z "$DASH_USER" || -z "$DASH_HOME" ]]; then
-        echo "⚠  Could not determine target user/home; skipping dashboard install." >&2
-        exit 0
+    # User services don't start at boot unless linger is enabled.
+    if ! loginctl show-user "$(id -un)" --property Linger 2>/dev/null | grep -q "Linger=yes"; then
+        loginctl enable-linger "$(id -un)" 2>/dev/null || true
     fi
 
-    DASH_BIN="$DASH_HOME/.cohort/bin"
-    DASH_UNIT_DST="/etc/systemd/system/cohort-dashboard.service"
-    RENDERED="$(cat <<UNIT
-[Unit]
-Description=Cohort worktree & PR dashboard
-After=network-online.target
-Wants=network-online.target
+    systemctl --user daemon-reload
+    systemctl --user enable --now cohort-dashboard
 
-[Service]
-Type=simple
-User=$DASH_USER
-Environment=HOME=$DASH_HOME
-Environment=PATH=$DASH_BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=$DASH_BIN/cohort-dashboard --refresh 30
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-)"
-
-    if [[ "$(id -u)" -eq 0 ]]; then
-        printf '%s\n' "$RENDERED" > "$DASH_UNIT_DST"
-        systemctl daemon-reload
-        systemctl enable --now cohort-dashboard
+    # Verify after mutation, not by exit code: a started-but-broken unit
+    # exits 0 from enable --now. Probe /healthz to confirm it serves.
+    BIND_URL="http://localhost:6283/healthz"
+    if curl -fsS --max-time 5 "$BIND_URL" >/dev/null 2>&1; then
         echo ""
-        echo "Dashboard service installed and started:"
-        echo "  $DASH_UNIT_DST (runs as $DASH_USER)"
-        echo "  Dashboard: http://localhost:6283/  (exe.dev: https://$(hostname).exe.xyz:6283/)"
-    elif sudo -n true 2>/dev/null; then
-        printf '%s\n' "$RENDERED" | sudo tee "$DASH_UNIT_DST" >/dev/null
-        sudo systemctl daemon-reload
-        sudo systemctl enable --now cohort-dashboard
-        echo ""
-        echo "Dashboard service installed and started:"
-        echo "  $DASH_UNIT_DST (runs as $DASH_USER)"
+        echo "Dashboard service installed and started (user unit):"
+        echo "  $DASH_USER_UNIT_DIR/cohort-dashboard.service"
         echo "  Dashboard: http://localhost:6283/  (exe.dev: https://$(hostname).exe.xyz:6283/)"
     else
-        printf '%s\n' "$RENDERED" > "$HOME/.cohort-dashboard.service"
         echo ""
-        echo "⚠  No root/sudo access — skipped the dashboard systemd install."
-        echo "   The rendered unit is at $HOME/.cohort-dashboard.service"
-        echo "   Finish manually:"
-        echo "     sudo install -m 644 $HOME/.cohort-dashboard.service $DASH_UNIT_DST"
-        echo "     sudo systemctl daemon-reload && sudo systemctl enable --now cohort-dashboard"
+        echo "⚠  Dashboard unit installed but /healthz not answering yet."
+        echo "    Check: systemctl --user status cohort-dashboard"
+        echo "          journalctl --user -u cohort-dashboard"
     fi
+else
+    echo "⚠  systemctl not found; skipping dashboard service install."
+    echo "    The unit is at $DASH_UNIT_SRC — install it manually:"
+    echo "      mkdir -p ~/.config/systemd/user"
+    echo "      cp $DASH_UNIT_SRC ~/.config/systemd/user/"
+    echo "      systemctl --user enable --now cohort-dashboard"
 fi
 

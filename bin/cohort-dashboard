@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""cohort-dashboard: serve a Cohort worktree/PR dashboard.
+"""cohort-dashboard: collect Cohort worktree/PR metadata and serve it.
 
-    cohort-dashboard [--port 6283] [--refresh 30]
+    cohort-dashboard [--port 6283] [--refresh 30] [--bind 127.0.0.1]
+    cohort-dashboard --json-only [--repos FILE]
 
 Collects worktree metadata (git) and PR metadata (gh), then serves a small
-single-page dashboard. No dependencies beyond Python 3 stdlib.
+single-page dashboard. One process instead of three: the collection
+pipeline (collect_git -> collect_gh) runs in-process, and --json-only
+exposes the collection half standalone (or piped to a tool) without the
+server. No dependencies beyond Python 3 stdlib.
 
-Endpoints:
+Endpoints (serve mode):
     /            the dashboard HTML
     /api/data    fresh JSON (git+gh, cached for --refresh seconds)
     /healthz     "ok"
@@ -25,14 +29,18 @@ from urllib.parse import urlparse
 
 DEFAULT_PORT = 6283
 DEFAULT_REFRESH = 30  # seconds between data refreshes
+DEFAULT_BIND = "127.0.0.1"  # loopback by default; --bind to expose
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "cohort-dashboard")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config")
 
-SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
-PREP = os.path.join(SCRIPT_DIR, "cohort-dashboard-prep")
-PR_SCRIPT = os.path.join(SCRIPT_DIR, "cohort-dashboard-pr")
-
+def run(args, timeout=20, cwd=None):
+    try:
+        proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, timeout=timeout, cwd=cwd)
+        return (proc.returncode, proc.stdout.strip(), proc.stderr.strip())
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return (1, "", str(exc))
 
 def _load_port_config():
     """Read the configured port from ~/.config/cohort-dashboard/config.
@@ -51,8 +59,594 @@ def _load_port_config():
         pass
     return DEFAULT_PORT
 
+# ── git collection ──────────────────────────────────────────────────────
 
-# ── data collection ──────────────────────────────────────────────────────
+REPOS_FILE = os.path.expanduser("~/.config/cohort-dashboard/repos")
+
+HEAD_ATOMS = (
+    "%(refname:short)", "%(upstream:short)", "%(objectname)",
+    "%(committerdate:iso8601-strict)", "%(subject)", "%(worktreepath)",
+    "%(ahead-behind:origin/DB)",
+)
+REMOTE_ATOMS = (
+    "%(refname)", "%(refname:short)", "%(objectname)", "%(symref)",
+    "%(committerdate:iso8601-strict)", "%(subject)",
+    "%(ahead-behind:origin/DB)",
+)
+
+def git(cwd, *args):
+    rc, out, _ = run(["git", "-C", cwd, *args])
+    return out if rc == 0 else ""
+
+def find_git_roots(start, max_depth=3):
+    """Bounded walk for git roots under `start`.
+
+    Returns absolute paths, de-duplicated. Stops descending into a dir once
+    it proves to be a git root (nested repos are rare and intentional).
+    """
+    found = []
+    base_depth = start.rstrip(os.sep).count(os.sep)
+    for root, dirs, files in os.walk(start):
+        depth = root.count(os.sep) - base_depth
+        is_repo = ".git" in dirs or ".git" in files
+        dirs[:] = [d for d in dirs
+                   if not d.startswith(".") or d == ".git"
+                   if d not in ("node_modules", "target", "vendor", "Library", "Applications")]
+        if is_repo:
+            found.append(os.path.abspath(root))
+            dirs[:] = []
+            continue
+        if depth >= max_depth:
+            dirs[:] = []
+    return list(dict.fromkeys(found))
+
+def discover_repos(repos_override=None):
+    """Repos to scan: --repos FILE > config file > auto-discover."""
+    explicit = repos_override
+    if not explicit and os.path.exists(REPOS_FILE):
+        explicit = REPOS_FILE
+
+    if explicit:
+        repos = []
+        with open(explicit) as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    repos.append(os.path.abspath(os.path.expanduser(line)))
+        return repos
+    return find_git_roots(os.path.expanduser("~"))
+
+def git_common_root_of(path):
+    """The primary checkout root owning this worktree's git metadata.
+
+    Different from --show-toplevel (which returns the worktree's own root):
+    all worktrees of one repo share a common git dir, and the primary
+    checkout is its parent. This is what makes dedup and canonical-naming
+    correct.
+    """
+    rc, out, _ = run(["git", "-C", path, "rev-parse", "--git-common-dir"])
+    if rc != 0 or not out:
+        return None
+    common = os.path.abspath(os.path.join(path, out))
+    if os.path.isfile(common):
+        try:
+            with open(common) as fh:
+                for line in fh:
+                    if line.startswith("gitdir:"):
+                        common = os.path.abspath(os.path.join(os.path.dirname(common), line.split(":", 1)[1].strip()))
+                        break
+        except OSError:
+            pass
+    if os.path.basename(common.rstrip(os.sep)).endswith(".git"):
+        return os.path.dirname(common.rstrip(os.sep))
+    tl = git_root_of(path)
+    return tl
+
+def git_root_of(path):
+    rc, out, _ = run(["git", "-C", path, "rev-parse", "--show-toplevel"])
+    return out if rc == 0 else None
+
+def web_url_of_remote(url):
+    """Base web URL (https) for a git remote, or "" if it's not https-able."""
+    if not url:
+        return ""
+    m = re.match(r"^(?:git@|https?://|ssh://)(?:[^@/]+@)?([^:/]+)[:/](.+?)(?:\.git)?$", url)
+    if not m:
+        return ""
+    host, path = m.groups()
+    if "." not in host and host != "localhost":
+        return ""
+    return f"https://{host}/{path.strip('/')}"
+
+def default_branch(cwd):
+    out = git(cwd, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if out:
+        return out.replace("refs/remotes/origin/", "")
+    for cand in ("main", "master"):
+        if git(cwd, "show-ref", "--verify", "--quiet", f"refs/remotes/origin/{cand}"):
+            return cand
+    return "main"
+
+def for_each_ref(cwd, refs, atoms, default):
+    """Run one for-each-ref with the given atoms, returning parsed rows.
+
+    Fields are separated by `%00` (a real NUL in output, a text placeholder
+    in argv — git translates it). One record per line; the trailing field
+    carries the newline. Callers that need the default-relative comparison
+    pass atoms containing `%(ahead-behind:origin/DB)`, replaced here with
+    the actual default branch.
+    """
+    fmt = "%00".join(atoms)
+    fmt = fmt.replace("origin/DB", f"origin/{default}")
+    rc, out, _ = run(["git", "-C", cwd, "for-each-ref", "--format", fmt, refs])
+    if rc != 0 or not out:
+        return []
+    n = len(atoms)
+    rows = []
+    for line in out.splitlines():
+        fields = line.split("\0")
+        if len(fields) != n:
+            continue  # malformed record (e.g. ahead-behind errored)
+        rows.append(fields)
+    return rows
+
+def status_counts(path):
+    """(staged, unstaged, untracked) via porcelain -z."""
+    rc, out, _ = run(["git", "-C", path, "status", "--porcelain=v1", "-z"])
+    if rc != 0 or not out:
+        return (0, 0, 0)
+    staged = unstaged = untracked = 0
+    for entry in out.split("\0"):
+        if not entry:
+            continue
+        xy = entry[:2]
+        if xy[0] == "?":
+            untracked += 1
+        else:
+            if xy[0] not in ". ":
+                staged += 1
+            if xy[1] not in ". ":
+                unstaged += 1
+    return (staged, unstaged, untracked)
+
+def upstream_ahead_behind(cwd, upstream, branch):
+    """(ahead, behind) of a branch vs its own upstream, via left-right."""
+    out = git(cwd, "rev-list", "--left-right", "--count", f"{upstream}...{branch}")
+    parts = out.split()
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        return int(parts[0]), int(parts[1])
+    return 0, 0
+
+def days_since(when):
+    """Days since an ISO timestamp, or None when unparseable."""
+    if not when:
+        return None
+    try:
+        dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
+    except ValueError:
+        return None
+
+def parse_ahead_behind(raw):
+    """(ahead, behind) from a `%(ahead-behind:ref)` field ("21 0")."""
+    parts = (raw or "").strip().split()
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    return int(parts[0]), int(parts[1])
+
+def scan_repo(root):
+    entry = {"root": root}
+    toplevel = git_root_of(root)
+    if not toplevel:
+        entry["error"] = "not a git repository"
+        return entry
+    if not os.path.isdir(toplevel):
+        entry["error"] = "path missing"
+        return entry
+
+    entry["root"] = toplevel
+    entry["name"] = os.path.basename(toplevel)
+    entry["remote"] = git(toplevel, "remote", "get-url", "origin")
+    entry["web"] = web_url_of_remote(entry["remote"])
+    db = entry["default_branch"] = default_branch(toplevel)
+
+    has_default = run(["git", "-C", toplevel, "show-ref", "--verify", "--quiet",
+                      f"refs/remotes/origin/{db}"])[0] == 0
+    # When the default ref is missing (empty clone, no origin), the
+    # ahead-behind atom would fail the whole call — drop it entirely.
+    head_atoms = [a for a in HEAD_ATOMS
+                  if a != "%(ahead-behind:origin/DB)" or has_default]
+    head_rows = for_each_ref(toplevel, "refs/heads/", head_atoms, db)
+    heads = {}
+    for row in head_rows:
+        branch = row[0]
+        heads[branch] = {
+            "branch": branch,
+            "upstream_ref": row[1] or "",
+            "head": row[2],
+            "head_short": row[2][:12],
+            "last_commit_at": row[3] or "",
+            "subject": row[4] or "",
+            "worktree": row[5] or "",
+        }
+        if has_default and len(row) > 6:
+            ab = parse_ahead_behind(row[6])
+            if ab:
+                heads[branch]["vs_default"] = ab
+
+    def default_rel(branch_data):
+        ab = branch_data.get("vs_default")
+        if ab is None:
+            return (None, False)  # no default ref to compare against
+        return (ab[0], ab[0] == 0)  # (commits_since_default, merged)
+
+    # Remote-tracking branches — the remote_only set.
+    remote_atoms = [a.replace("origin/DB", f"origin/{db}")
+                    for a in REMOTE_ATOMS
+                    if not a.startswith("%(ahead-behind") or has_default]
+    remote_rows = for_each_ref(toplevel, "refs/remotes/origin/", remote_atoms, db)
+    remote_names = set()
+    remote_only = []
+    local_names = set(heads)
+    for row in remote_rows:
+        full, ref, oid = row[0], row[1], row[2]
+        sym = row[3]
+        if full.rstrip("/") == "refs/remotes/origin":
+            continue
+        if sym:
+            continue
+        br = ref.removeprefix("origin/")
+        if br == "HEAD" or br.startswith("pr/"):
+            continue
+        # Every real remote branch counts as "exists on the remote",
+        # including the default branch itself.
+        remote_names.add(br)
+        if br == db or br in local_names:
+            continue
+        item = {"branch": br, "head": oid, "head_short": oid[:12]}
+        if has_default and len(row) > 6:
+            ab = parse_ahead_behind(row[6])
+            item["merged"] = (ab is not None and ab[0] == 0) if ab else False
+            item["commits_since_default"] = ab[0] if ab else 0
+        else:
+            item["merged"] = False
+            item["commits_since_default"] = 0
+        item["subject"] = row[5] or ""
+        item["last_commit_at"] = row[4] or ""
+        item["days_since_last_commit"] = days_since(row[4] or "")
+        remote_only.append(item)
+
+    entry["worktrees"] = []
+    entry["orphans"] = []
+    entry["remote_only"] = remote_only
+
+    worktree_branches = set()
+    for branch, hd in heads.items():
+        wt_path = hd.get("worktree") or ""
+        if not wt_path:
+            continue
+        worktree_branches.add(branch)
+        item = {
+            "path": wt_path,
+            "branch": branch,
+            "is_primary": wt_path == toplevel,
+            "on_remote": branch in remote_names,
+            "head": hd["head"],
+            "head_short": hd["head_short"],
+        }
+        item["subject"] = hd["subject"]
+        item["last_commit_at"] = hd["last_commit_at"]
+        item["days_since_last_commit"] = days_since(hd["last_commit_at"])
+
+        staged, unstaged, untracked = status_counts(wt_path)
+        item.update(
+            staged=staged, unstaged=unstaged, untracked=untracked,
+            dirty_files=staged + unstaged + untracked,
+        )
+
+        upstream = hd["upstream_ref"]
+        item["has_upstream"] = bool(upstream)
+        item["upstream_ref"] = upstream
+        if upstream:
+            item["ahead"], item["behind"] = upstream_ahead_behind(toplevel, upstream, branch)
+        else:
+            item["ahead"], item["behind"] = 0, 0
+        commits_since_default, _ = default_rel(hd)
+        item["commits_since_default"] = commits_since_default if commits_since_default is not None else 0
+
+        if item["dirty_files"]:
+            status = "dirty"
+        elif not item["has_upstream"]:
+            status = "new" if item["ahead"] else "noupstream"
+        elif item["ahead"]:
+            status = "unpushed"
+        else:
+            status = "idle"
+        item["status"] = status
+        entry["worktrees"].append(item)
+
+    for branch, hd in heads.items():
+        if branch in worktree_branches or branch == db:
+            continue
+        ob = {
+            "branch": branch,
+            "upstream_ref": hd["upstream_ref"],
+            "has_upstream": bool(hd["upstream_ref"]),
+            "on_remote": branch in remote_names,
+            "head": hd["head"],
+            "head_short": hd["head_short"],
+        }
+        commits_since_default, merged = default_rel(hd)
+        ob["merged"] = merged
+        ob["commits_since_default"] = commits_since_default if commits_since_default is not None else 0
+        ob.update(subject=hd["subject"], last_commit_at=hd["last_commit_at"])
+        ob["days_since_last_commit"] = days_since(hd["last_commit_at"])
+        if not ob["has_upstream"]:
+            ob["status"] = "merged" if ob["merged"] else "orphan"
+        else:
+            ob["status"] = "merged" if ob["merged"] else "tracked"
+        entry["orphans"].append(ob)
+
+    return entry
+
+def collect_git(repos_override=None):
+    repos = discover_repos(repos_override)
+    seen, unique = set(), []
+    for r in repos:
+        toplevel = git_common_root_of(r) or git_root_of(r)
+        if toplevel and toplevel not in seen:
+            seen.add(toplevel)
+            unique.append(toplevel)
+        elif not toplevel and r not in seen:
+            seen.add(r)
+            unique.append(r)
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "repos": [scan_repo(r) for r in unique],
+    }
+    return payload
+
+# ── gh collection ────────────────────────────────────────────────
+
+def gh(cwd, *args):
+    """Run gh through cohort-gh (host derived from origin remote).
+
+    cohort-gh derives GH_HOST from `git remote get-url origin` in ITS cwd,
+    so we must launch it from the repo root (cwd), not from wherever the
+    server happened to be started.
+    """
+    rc, out, err = run(["cohort-gh", *args], timeout=25, cwd=cwd)
+    return (rc, out, err)
+
+def live_branches(repo):
+    """Branch names that exist on the origin remote right now.
+
+    refs/remotes/origin/* goes stale: after a PR merges and its branch is
+    deleted on GitHub, the local remote-tracking ref lingers until a prune,
+    so prep's on_remote (derived from those refs) over-reports branches
+    that would 404. One ls-remote is cheap next to the gh calls we already
+    make and reflects upstream truth.
+
+    Returns None when the check fails (network hiccup, no origin) — callers
+    then keep the prep-derived values rather than guessing.
+    """
+    root = repo.get("root")
+    if not root or not os.path.isdir(root):
+        return None
+    rc, out, _ = run(["git", "-C", root, "ls-remote", "--heads", "origin"], timeout=30)
+    if rc != 0:
+        return None
+    names = {
+        line.split("\t")[-1].removeprefix("refs/heads/")
+        for line in out.splitlines()
+        if "\t" in line
+    }
+    names.discard("")
+    return names
+
+def collect_prs(repo):
+    """Return {branch: {…pr fields…}, '__open__': [pr, …], '__web__': url} for one repo.
+
+    Also resolves the canonical (public) web URL for the repo — gh knows the
+    real GitHub domain, whereas the git remote may point at an internal
+    mirror the browser/client can't reach.
+    """
+    env_guard = os.environ.get("COHORT_NO_GH")
+    if env_guard:
+        return {}
+
+    root = repo.get("root")
+    if not root or not os.path.isdir(root):
+        return {}
+
+    result = {}
+    # Canonical web URL first: gh returns the public github.com address even
+    # when the origin remote uses an internal mirror host.
+    rc, out, _ = gh(root, "repo", "view", "--json", "url")
+    if rc == 0 and out:
+        try:
+            url = json.loads(out).get("url", "")
+            if url:
+                result["__web__"] = url.rstrip("/")
+        except json.JSONDecodeError:
+            pass
+
+    rc, out, err = gh(root, "pr", "list", "--state", "all", "--limit", "100", "--json",
+                      "number,title,state,url,isDraft,headRefName,baseRefName,createdAt,updatedAt,reviewDecision,mergeable,additions,deletions,headRefOid")
+    if rc != 0 or not out:
+        return result
+    try:
+        prs = json.loads(out)
+    except json.JSONDecodeError:
+        return result
+
+    open_prs = []
+    for pr in prs:
+        head = pr.get("headRefName", "")
+        if pr.get("state") == "OPEN":
+            open_prs.append(pr)
+        if head:
+            result[head] = pr
+    result["__open__"] = open_prs
+    return result
+
+def enrich(entry, pr):
+    """Attach pr_* fields to a worktree/orphan/remote-only entry."""
+    head = pr.get("headRefOid") or ""
+    entry["pr_number"] = pr.get("number")
+    entry["pr_state"] = pr.get("state")
+    entry["pr_title"] = pr.get("title")
+    entry["pr_url"] = pr.get("url")
+    entry["pr_draft"] = pr.get("isDraft")
+    entry["pr_created_at"] = pr.get("createdAt")
+    entry["pr_updated_at"] = pr.get("updatedAt")
+    entry["pr_review_decision"] = pr.get("reviewDecision") or ""
+    entry["pr_mergeable"] = pr.get("mergeable") or ""
+    entry["pr_additions"] = pr.get("additions", 0)
+    entry["pr_deletions"] = pr.get("deletions", 0)
+    entry["pr_head_sha"] = head[:12]
+    entry["pr_head_sha_matches"] = bool(head) and entry.get("head_short") == head[:12]
+
+def recency_band(days):
+    """0,1,2,3 for <1d, <3d, <7d, older — the recency ladder."""
+    if days is None:
+        return 3
+    if days < 1:
+        return 0
+    if days < 3:
+        return 1
+    if days < 7:
+        return 2
+    return 3
+
+def urgency_key(entry):
+    """Sort key: lower = more urgent. See dashboard-design.md "Row
+    ordering". Must mirror the page's rowUrgency:
+      0 open PR ready, 1 open PR draft, 2 dirty/unpushed,
+      3 clean (band 0..3 -> 3..6), 9 merged/deleted.
+    """
+    pr_state = entry.get("pr_state") or ""
+    if pr_state == "OPEN":
+        return 1 if entry.get("pr_draft") else 0
+    if entry.get("dirty_files") or entry.get("ahead"):
+        return 2
+    if pr_state == "MERGED" or entry.get("deleted") or entry.get("merged"):
+        return 9
+    return 3 + recency_band(entry.get("days_since_last_commit"))
+
+def sort_groups(repo):
+    """Order every row by urgency, recency second — server-side, so
+    /api/data reflects the same ordering the page paints. Enrichment has
+    already run and is what fills pr_state/merged; orphan/remote-only
+    groups are mostly history and sink together."""
+    def key(entry):
+        days = entry.get("days_since_last_commit")
+        return (urgency_key(entry),
+                days if days is not None else float("inf"))
+    for group in (repo.get("worktrees", []),
+                  repo.get("orphans", []),
+                  repo.get("remote_only", [])):
+        group.sort(key=key)
+    # Open PRs: drafts after ready, then most recently updated first.
+    open_prs = repo.get("open_prs", [])
+    def _ts(p):
+        raw = p.get("updatedAt") or p.get("createdAt") or ""
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    open_prs.sort(key=lambda p: ((1 if p.get("isDraft") else 0), -_ts(p)))
+
+def status_after_reconcile(entry):
+    """Reclassify a worktree's status once live-remote truth is known.
+
+    prep's status only knows what local git refs say: a clean branch whose
+    remote-tracking ref lingers (merged PR, branch deleted upstream) is
+    tagged "idle" even though its GitHub page is gone, and a never-pushed
+    branch is "noupstream". Now that on_remote/deleted reflect reality,
+    tighten the labels so the pill says what's actually true:
+
+      dirty       uncommitted changes (unchanged)
+      unpushed    ahead of upstream (unchanged)
+      deleted     was on the remote, no longer is (merged then removed)
+      up to date  clean, exists on the remote
+      local       clean, never pushed / no upstream
+
+    Only worktrees are reclassified; orphans/remote-only keep their own
+    status semantics.
+    """
+    if entry.get("dirty_files"):
+        return "dirty"
+    if entry.get("ahead"):
+        return "unpushed"
+    if entry.get("deleted"):
+        return "deleted"
+    if entry.get("on_remote"):
+        return "up to date"
+    return "local"
+
+def collect_gh(payload):
+    for repo in payload.get("repos", []):
+        prs = collect_prs(repo)
+        # Canonical public web URL from gh (see collect_prs): the browser
+        # links must point at the real GitHub domain, not an internal
+        # mirror host derived from the git remote.
+        web = prs.get("__web__")
+        if web:
+            repo["web"] = web
+        # Reconcile on_remote against the actual live branches: refs/
+        # remotes/origin/* can hold refs whose upstream branch was deleted
+        # (merged PR heads). Those must be struck through, not linked.
+        live = live_branches(repo)
+        if live is not None:
+            for label, group in (("worktrees", repo.get("worktrees", [])),
+                                 ("orphans", repo.get("orphans", [])),
+                                 ("remote_only", repo.get("remote_only", []))):
+                for entry in group:
+                    existed = entry.get("on_remote", False)
+                    entry["on_remote"] = entry.get("branch", "") in live
+                    if label == "remote_only":
+                        # remote_only entries are remote-tracking refs by
+                        # definition — if the live check no longer sees
+                        # them, the branch was deleted on the remote.
+                        deleted = not entry["on_remote"]
+                    else:
+                        # Deleted = was on the remote but isn't anymore
+                        # (struck through). Local-only branches (never
+                        # pushed, no upstream) get no link and no
+                        # decoration.
+                        deleted = bool(existed) and not entry["on_remote"]
+                    entry["deleted"] = deleted
+                    if label == "worktrees":
+                        entry["status"] = status_after_reconcile(entry)
+        for group in (repo.get("worktrees", []),
+                      repo.get("orphans", []),
+                      repo.get("remote_only", [])):
+            for entry in group:
+                pr = prs.get(entry.get("branch", ""))
+                if pr:
+                    enrich(entry, pr)
+        repo["open_prs"] = prs.get("__open__", [])
+        sort_groups(repo)
+    payload["pr_enriched"] = True
+    return payload
+
+def full_payload(repos_override=None):
+    """Collect git facts, then enrich with gh PR data.
+
+    gh can be slow or fail; the dashboard degrades to git-only data with
+    a pr_error instead of 500ing (see design doc "Failure handling").
+    """
+    data = collect_git(repos_override)
+    try:
+        collect_gh(data)
+    except Exception as exc:  # noqa: BLE001 — report, don't crash the server
+        data["pr_error"] = str(exc)[:300]
+    return data
+
+
+# ── data cache ───────────────────────────────────────────────────────────
 
 class DataCache:
     """Thin TTL cache around the collect pipeline.
@@ -61,25 +655,15 @@ class DataCache:
     cache the combined payload for a few seconds.
     """
 
-    def __init__(self, ttl=DEFAULT_REFRESH):
+    def __init__(self, ttl=DEFAULT_REFRESH, repos_file=None):
         self.ttl = ttl
+        self._repos_file = repos_file
         self._lock = threading.Lock()
         self._data = None
         self._at = 0.0
 
     def _collect(self):
-        proc = subprocess.run([PREP], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, timeout=120)
-        if proc.returncode != 0:
-            raise RuntimeError(f"prep failed: {proc.stderr[:500]}")
-        data = json.loads(proc.stdout)
-        proc = subprocess.run([PR_SCRIPT], input=proc.stdout, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, text=True, timeout=120)
-        if proc.returncode != 0:
-            # gh failure shouldn't kill the dashboard: fall back to git-only
-            data["pr_error"] = proc.stderr[:300]
-        else:
-            data = json.loads(proc.stdout)
+        data = full_payload(self._repos_file)
         data["collected_at"] = datetime.now(timezone.utc).isoformat()
         return data
 
@@ -93,9 +677,6 @@ class DataCache:
         with self._lock:
             self._data, self._at = data, now
         return data
-
-
-_cache = DataCache()
 
 # ── HTML ─────────────────────────────────────────────────────────────────
 
@@ -383,7 +964,7 @@ setInterval(refresh, 30000);
 </html>
 """
 
-# ── HTTP ─────────────────────────────────────────────────────────────────
+# ── server ────────────────────────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "cohort-dashboard/1"
@@ -417,10 +998,22 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
 
+def serve(bind, port, refresh, repos_file=None):
+    global _cache
+    _cache = DataCache(ttl=refresh, repos_file=repos_file)
+    srv = ThreadingHTTPServer((bind, port), Handler)
+    print(f"cohort dashboard on http://{bind}:{port} (refresh {refresh}s)")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
 
 def main():
     port = _load_port_config()
     refresh = DEFAULT_REFRESH
+    bind = DEFAULT_BIND
+    json_only = False
+    repos_file = None
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -428,17 +1021,19 @@ def main():
             port = int(args[i + 1]); i += 2
         elif args[i] == "--refresh" and i + 1 < len(args):
             refresh = int(args[i + 1]); i += 2
+        elif args[i] == "--bind" and i + 1 < len(args):
+            bind = args[i + 1]; i += 2
+        elif args[i] == "--repos" and i + 1 < len(args):
+            repos_file = args[i + 1]; i += 2
+        elif args[i] == "--json-only":
+            json_only = True; i += 1
         else:
             i += 1
-    global _cache
-    _cache = DataCache(ttl=refresh)
-    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"cohort dashboard on http://0.0.0.0:{port} (refresh {refresh}s)")
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        pass
-
+    if json_only:
+        print(json.dumps(full_payload(repos_file), indent=2))
+        return
+    serve(bind, port, refresh, repos_file)
 
 if __name__ == "__main__":
     main()
+
