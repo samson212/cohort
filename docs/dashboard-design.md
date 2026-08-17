@@ -7,8 +7,11 @@ meant to be read from a browser, refreshed periodically, and trusted to
 never fall over — including when GitHub's API is slow or down.
 
 It is environment-agnostic by design: the server binds a port and serves
-relative paths. Whatever domain, reverse proxy, or auth layer wraps it is
-an external concern. On an exe.dev VM users typically expose it through
+relative paths. It binds **127.0.0.1 by default** (`--bind 0.0.0.0` to
+expose), so without a proxy/reverse it is reachable only locally.
+Whatever domain, reverse proxy, or auth layer wraps it is
+an external concern; the exe.dev proxy reaches it by forwarding to the
+bound interface even when loopback. On an exe.dev VM users typically expose it through
 the built-in HTTPS proxy; on a local machine they access it via
 `http://localhost:6283`. The port is set at install time with
 `cohort-init --dashboard-port` and stored in a config file.
@@ -90,6 +93,7 @@ One JSON document per scrape:
 {
   "generated_at": "…Z",            # when collect_git ran
   "collected_at": "…Z",            # when the server cached it
+  "refresh_interval_ms": 30000,    # the server's --refresh, in ms
   "pr_enriched": true,             # false when gh was skipped/failed
   "pr_error": null,                # set when gh failed (non-fatal)
   "repos": [
@@ -241,8 +245,10 @@ WantedBy=default.target
   selection" below). The unit deliberately passes no `--port` so the
   config file keeps authority. On an exe.dev VM, expose it through the
   proxy: `ssh exe.dev share port <vm> 6283`.
-- `--refresh` is the server-side cache TTL (default 30s); the page also
-  auto-refreshes client-side on a fixed 30s timer.
+- `--refresh` is the server-side cache TTL (default 30s). The server
+  serves it as `refresh_interval_ms` in the payload, and the page uses
+  that value for its own auto-refresh timer (footer shows it too) — one
+  owner, no client-side hardcode.
 - The deployed script lives in `~/.cohort/bin/` (a symlink to the primary
   checkout's `bin/`), so the unit's ExecStart is the stable path.
   `install.sh` installs and starts this unit. During development it may

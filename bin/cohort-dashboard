@@ -655,6 +655,7 @@ class DataCache:
     def _collect(self):
         data = full_payload(self._repos_file)
         data["collected_at"] = datetime.now(timezone.utc).isoformat()
+        data["refresh_interval_ms"] = self.ttl * 1000
         return data
 
     def get(self):
@@ -750,7 +751,7 @@ PAGE = """<!doctype html>
 </header>
 <div class="wrap">
   <div id="repo-views"></div>
-  <footer>Auto-refreshes every 30s · data collected from local git + <code>gh</code> · cohort engine</footer>
+  <footer>Auto-refreshes every <span id="refresh-note">30s</span> · data collected from local git + <code>gh</code> · cohort engine</footer>
 </div>
 <script>
 const fmt = {
@@ -872,6 +873,10 @@ function prRow(pr, repo) {
 function render(data) {
   const updated = document.getElementById('updated');
   updated.innerHTML = `<span class="dot"></span>updated ${fmt.time(data.collected_at || data.generated_at)}`;
+  const note = document.getElementById('refresh-note');
+  if (note && data.refresh_interval_ms) {
+    note.textContent = (data.refresh_interval_ms / 1000) + 's';
+  }
 
   const views = (data.repos || []).map(repo => {
     // The server (sort_groups) has already ordered every group — active PRs
@@ -948,7 +953,15 @@ async function refresh() {
 }
 
 refresh();
-setInterval(refresh, 30000);
+// Refresh interval comes from the payload (server --refresh owner), falling
+// back to 30s when absent (e.g. an older cached payload).
+(async () => {
+  try {
+    const r = await fetch('/api/data');
+    const d = await r.json();
+    setInterval(refresh, Number(d.refresh_interval_ms) || 30000);
+  } catch { setInterval(refresh, 30000); }
+})();
 </script>
 </body>
 </html>
