@@ -1,4 +1,5 @@
 ---
+name: cohort-pr
 description: Create or update a pull request — draft title/description for the current branch's commits. New PRs are always opened as drafts.
 ---
 

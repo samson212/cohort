@@ -1,4 +1,5 @@
 ---
+name: cohort-sync
 description: Sync with the remote, show unpushed commits, then push
 ---
 

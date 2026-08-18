@@ -19,7 +19,7 @@ export PATH="$HOME/.cohort/bin:$PATH"
 
 Once that's done, from any project root, `cohort-init` scaffolds a `.cohort/`
 directory and installs the Shelley system-prompt hook plus the `/cohort-*`
-slash hooks.
+slash hook (rendered from the portable `skills/` registry).
 
 ```bash
 cd ~/my-project
@@ -31,7 +31,7 @@ cohort-init
 - [Engine installation](docs/engine-install.md) — layout, bootstrap, updates
 - [Git workflow](docs/git-workflow.md) — worktrees, branches, commits
 - [Agent roles](docs/agent-roles.md) — the agent catalog and how prompts compose
-- [Agent commands](docs/agent-commands.md) — slash command reference
+- [Agent skills](docs/agent-commands.md) — slash-command skills reference
 - [Code review guidelines](docs/code-review-guidelines.md)
 
 ## Update
@@ -45,10 +45,10 @@ cohort-update
 ```
 ~/.cohort -> ~/cohort       # symlink for tooling
 ~/.cohort/
-  bin/                      # scripts (cohort-new-worktree, …)
+  bin/                      # scripts (cohort-new-worktree, cohort-skill, …)
   agents/                   # persona + docs per role
-  commands/                 # slash command prompts
-  hooks/                    # system-prompt + slash hooks
+  skills/                   # slash-command skills (skills/cohort-<name>/SKILL.md)
+  hooks/                    # system-prompt + slash/cohort skill renderer
   docs/                     # conventions (git-workflow, code-review, …)
 ```
 
