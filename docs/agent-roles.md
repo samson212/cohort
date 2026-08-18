@@ -10,6 +10,7 @@ agents/
     agent-roles.md          -> ../../docs/agent-roles.md
     agent-commands.md       -> ../../docs/agent-commands.md
     engine-install.md       -> ../../docs/engine-install.md
+    subagent-models.md      -> ../../docs/subagent-models.md
   reviewer/                 # universal + delta
     prompt.md
     code-review-guidelines.md -> ../../docs/code-review-guidelines.md
