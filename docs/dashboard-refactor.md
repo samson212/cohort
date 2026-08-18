@@ -1,6 +1,7 @@
 # Dashboard complexity-reduction refactor
 
-State of the plan. Source: `REVIEW.md` + `REVIEW-02.md` (both in repo root).
+State of the plan. Source: `reviews/agent-dashboard/01-complexity.md`
++ `reviews/agent-dashboard/02-alternative-approaches.md`.
 Goal: 1,262 → ~560 LOC, 60 → ~10 git spawns/repo, 3 processes → 1, one
 "branch" model instead of four.
 
@@ -23,7 +24,7 @@ Goal: 1,262 → ~560 LOC, 60 → ~10 git spawns/repo, 3 processes → 1, one
   - Caveats found: `%(ahead-behind:)` needs git ≥ 2.41 and fatals the whole
     call if the compared ref is missing (guarded via `show-ref` + atom
     drop). NUL separator must be written as `%00` (literal NUL breaks argv).
-- ✅ Committed reviews: `2055a8c` (`REVIEW.md` + `REVIEW-02.md`).
+- ✅ Committed reviews: `2055a8c` (`reviews/agent-dashboard/01-complexity.md` + `reviews/agent-dashboard/02-alternative-approaches.md`).
 
 - ✅ **Delete `no_gh` + client-side sort mirror** (`72b547b`)
   - `no_gh` query param, cache bucket, `_no_gh` fields — all gone (no caller).
@@ -50,9 +51,12 @@ Goal: 1,262 → ~560 LOC, 60 → ~10 git spawns/repo, 3 processes → 1, one
     home in a user manager (verified live on this VM on port 6411).
   - install.sh: removed the entire generated-unit machinery (heredoc,
     SUDO_USER derivation, blank-value guards, three-branch ladder);
-    now copies the static unit, `loginctl enable-linger`, `--user enable
-    --now`, then verifies `curl /healthz`.
-  - Fixes port-ownership (REVIEW.md #1) for free; no root needed.
+    now symlinks the static unit, `loginctl enable-linger`, `--user enable
+    --now`, then verifies `curl /healthz`. The probe reads the configured
+    port so a non-default `--dashboard-port` isn't misreported as broken,
+    and a re-run migrates away from any legacy *system* unit the
+    pre-merger installer left behind.
+  - Fixes port-ownership (reviews/agent-dashboard/01-complexity.md #1) for free; no root needed.
 
 - ✅ **Dead `pr_*` enrichment fields** (`a072c67`) — partial Task 4
   - `enrich()` writes only the 4 fields the page reads (`pr_number`,

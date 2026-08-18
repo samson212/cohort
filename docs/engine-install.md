@@ -59,7 +59,7 @@ Then, from any project root:
 cohort-init
 ```
 
-The installer also sets up the **dashboard service**: `install.sh` copies
+The installer also sets up the **dashboard service**: `install.sh` symlinks
 a static systemd **user** unit (`bin/cohort-dashboard.service` with
 `%h`, which a user manager resolves to the invoking user's home) into
 `~/.config/systemd/user/`, enables linger, and starts it via the user

@@ -3,7 +3,7 @@
 Scope: the dashboard feature as it stands on this branch — 19 commits,
 12 files, +1960/−4 — reviewed as a final-state diff against `main`.
 This is a review-type pass (correctness, robustness, edge cases),
-complementing the architecture passes in REVIEW.md and REVIEW-02.md.
+complementing the architecture passes in `01-complexity.md` and `02-alternative-approaches.md`.
 
 **Verification performed:** the full pipeline (`prep → pr → server`) was
 run end-to-end on the VM against the live engine; the systemd dashboard

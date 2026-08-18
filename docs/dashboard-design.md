@@ -86,7 +86,7 @@ collection pipeline is independently testable (pipe it to
 boundary the old three-script split used to enforce by process isolation.
 
 The systemd unit is a static user unit shipped in the repo
-(`bin/cohort-dashboard.service`); install.sh copies it into place.
+(`bin/cohort-dashboard.service`); install.sh symlinks it into place.
 
 ## Data model
 
@@ -216,7 +216,7 @@ the base it is usually a no-op.
 The dashboard runs as a systemd **user** unit shipped in the repo
 (`bin/cohort-dashboard.service`). A user unit's `%h` resolves to the
 user manager's home (the owner of the unit), so a single static file
-serves every user — `install.sh` just copies it into
+serves every user — `install.sh` just symlinks it into
 `~/.config/systemd/user/` and starts it:
 
 ```
