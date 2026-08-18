@@ -12,6 +12,7 @@ so it never drifts from the source.
 | `/cohort-sync` | `commands/cohort-sync.md` | Fetch, show commits, push, display result |
 | `/cohort-pr` | `commands/cohort-pr.md` | Create draft PR or update description for the current branch |
 | `/cohort-cleanup` | `commands/cohort-cleanup.md` | Check unresolved comments, hand off merge, clean up worktree/branch, update main |
+| `/cohort-update` | `commands/cohort-update.md` | Update the Cohort engine to the latest main |
 
 `cohort-gh` (in `bin/`) is the sanctioned way to run the GitHub CLI on
 this VM. `docs/cohort-gh.md` explains the exe.dev integration model —
