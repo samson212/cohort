@@ -30,6 +30,38 @@ Worktrees live under `$HOME/worktrees/`, not inside a session scratchpad
 — scratchpads are ephemeral and can be cleaned up; parked work should survive
 that. Branch names use the `agent/` prefix already established in this repo.
 
+## Which `bin/` to edit — the engine's, not the worktree's
+
+There are two `bin/` directories and only one of them is ever executed:
+
+- **The engine's `bin/`** at `~/cohort/bin` — reachable as `~/.cohort/bin`
+  through the `~/.cohort -> ~/cohort` symlink. This is the directory on
+  `PATH` (`export PATH="$HOME/.cohort/bin:$PATH"`), and it's what slash
+  hooks and systemd units invoke by name. **This is the copy that runs.**
+- **A worktree's `bin/`** at `~/worktrees/<topic>/bin` — a regular copy of
+  the repo tree on your branch. **Nothing executes from here.** PATH is
+  absolute (`$HOME/.cohort/bin`), not relative to your cwd, so even running
+  `cohort-foo` from inside a worktree resolves the engine's copy, not the
+  worktree's.
+
+So when you edit `~/worktrees/<topic>/bin/cohort-foo` and then run
+`cohort-foo`, you run the *engine's* version — your edit seems to do nothing
+because it isn't being executed. It only takes effect once the branch is
+merged and the primary checkout's `~/cohort/bin` receives the new file.
+
+What to do instead:
+
+- **Edit in the worktree** — that copy is what gets committed and merged;
+  the engine copy is updated only by merging.
+- **To run the new behavior before merge**, invoke the worktree's copy
+  directly (`~/worktrees/<topic>/bin/cohort-foo`), or point the specific
+  consumer at it (e.g. a systemd drop-in overriding `ExecStart=`, not the
+  engine unit). Don't copy worktree scripts into `~/.cohort/bin` to "make
+  it work" — that's the primary checkout, and it dirties the one place
+  that must stay pristine.
+- **After merge**, the engine's `bin/` is updated by the merge, PATH
+  resolves the new version everywhere, and no extra step is needed.
+
 ## Start in the primary checkout, move before committing
 
 It’s fine to explore and edit in the primary checkout. When you’re

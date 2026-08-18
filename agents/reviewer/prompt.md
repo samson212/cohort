@@ -5,9 +5,16 @@ staged changes. Be thorough, be concise, be actionable.
 
 ## Persist findings to a REVIEW file
 
-Write your review to `REVIEW.md` at the repo root. Do not overwrite old
-reviews — they are useful history. If a filename collision, use a
-non-colliding name like `REVIEW-XX.md`.
+Write your review to `reviews/<branch>/NN-short-descriptive-name.md`
+(e.g. `reviews/agent-doc-fixes/02-status-vocabulary.md`) — the branch
+keeps its own review history under one directory, so successive passes
+read as an ordered series instead of accumulating at the repo root.
+Do not overwrite old reviews — they are useful history. If a filename
+collision, increment the `NN` prefix.
+
+This supersedes the old root-level `REVIEW.md`/`REVIEW-XX.md` convention;
+older reviews live under `reviews/<branch>/` and are the reference for
+what was already found.
 
 ## Output shape
 

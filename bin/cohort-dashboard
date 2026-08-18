@@ -1,0 +1,1081 @@
+#!/usr/bin/env python3
+"""cohort-dashboard: collect Cohort worktree/PR metadata and serve it.
+
+    cohort-dashboard [--port 6283] [--refresh 30] [--bind 127.0.0.1]
+    cohort-dashboard --json-only [--repos FILE]
+
+Collects worktree metadata (git) and PR metadata (gh), then serves a small
+single-page dashboard. One process instead of three: the collection
+pipeline (collect_git -> collect_gh) runs in-process, and --json-only
+exposes the collection half standalone (or piped to a tool) without the
+server. No dependencies beyond Python 3 stdlib.
+
+Endpoints (serve mode):
+    /            the dashboard HTML
+    /api/data    fresh JSON (git+gh, cached for --refresh seconds)
+    /healthz     "ok"
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+
+DEFAULT_PORT = 6283
+DEFAULT_REFRESH = 30  # seconds between data refreshes
+DEFAULT_BIND = "127.0.0.1"  # loopback by default; --bind to expose
+
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "cohort-dashboard")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config")
+
+def run(args, timeout=20, cwd=None):
+    try:
+        proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, timeout=timeout, cwd=cwd)
+        return (proc.returncode, proc.stdout.strip(), proc.stderr.strip())
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return (1, "", str(exc))
+
+def _load_port_config():
+    """Read the configured port from ~/.config/cohort-dashboard/config.
+
+    Only the port is honored. The server serves relative paths that
+    resolve against whatever origin the page was loaded from, so a
+    configured domain would only send the browser's fetch to a wrong
+    origin — never inject one (see dashboard-design.md).
+    """
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE) as fh:
+                fcfg = json.load(fh)
+            return int(fcfg.get("port", DEFAULT_PORT))
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        print(f"Warning: could not parse {CONFIG_FILE} ({exc}); using port {DEFAULT_PORT}", file=sys.stderr)
+    return DEFAULT_PORT
+
+# ── git collection ──────────────────────────────────────────────────────
+
+REPOS_FILE = os.path.expanduser("~/.config/cohort-dashboard/repos")
+
+HEAD_ATOMS = (
+    "%(refname:short)", "%(upstream:short)", "%(objectname)",
+    "%(committerdate:iso8601-strict)", "%(subject)", "%(worktreepath)",
+    "%(ahead-behind:origin/DB)",
+)
+REMOTE_ATOMS = (
+    "%(refname)", "%(refname:short)", "%(objectname)", "%(symref)",
+    "%(committerdate:iso8601-strict)", "%(subject)",
+    "%(ahead-behind:origin/DB)",
+)
+
+def git(cwd, *args):
+    rc, out, _ = run(["git", "-C", cwd, *args])
+    return out if rc == 0 else ""
+
+def find_git_roots(start, max_depth=3):
+    """Bounded walk for git roots under `start`.
+
+    Returns absolute paths, de-duplicated. Stops descending into a dir once
+    it proves to be a git root (nested repos are rare and intentional).
+    """
+    found = []
+    base_depth = start.rstrip(os.sep).count(os.sep)
+    for root, dirs, files in os.walk(start):
+        depth = root.count(os.sep) - base_depth
+        is_repo = ".git" in dirs or ".git" in files
+        dirs[:] = [d for d in dirs
+                   if not d.startswith(".") or d == ".git"
+                   if d not in ("node_modules", "target", "vendor", "Library", "Applications")]
+        if is_repo:
+            found.append(os.path.abspath(root))
+            dirs[:] = []
+            continue
+        if depth >= max_depth:
+            dirs[:] = []
+    return list(dict.fromkeys(found))
+
+def discover_repos(repos_override=None):
+    """Repos to scan: --repos FILE > config file > auto-discover."""
+    explicit = repos_override
+    if not explicit and os.path.exists(REPOS_FILE):
+        explicit = REPOS_FILE
+
+    if explicit:
+        repos = []
+        with open(explicit) as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    repos.append(os.path.abspath(os.path.expanduser(line)))
+        return repos
+    return find_git_roots(os.path.expanduser("~"))
+
+def git_common_root_of(path):
+    """The primary checkout root owning this worktree's git metadata.
+
+    Different from --show-toplevel (which returns the worktree's own root):
+    all worktrees of one repo share a common git dir, and the primary
+    checkout is its parent. This is what makes dedup and canonical-naming
+    correct.
+    """
+    rc, out, _ = run(["git", "-C", path, "rev-parse", "--git-common-dir"])
+    if rc != 0 or not out:
+        return None
+    common = os.path.abspath(os.path.join(path, out))
+    if os.path.isfile(common):
+        try:
+            with open(common) as fh:
+                for line in fh:
+                    if line.startswith("gitdir:"):
+                        common = os.path.abspath(os.path.join(os.path.dirname(common), line.split(":", 1)[1].strip()))
+                        break
+        except OSError:
+            pass
+    if os.path.basename(common.rstrip(os.sep)).endswith(".git"):
+        return os.path.dirname(common.rstrip(os.sep))
+    tl = git_root_of(path)
+    return tl
+
+def git_root_of(path):
+    rc, out, _ = run(["git", "-C", path, "rev-parse", "--show-toplevel"])
+    return out if rc == 0 else None
+
+def web_url_of_remote(url):
+    """Base web URL (https) for a git remote, or "" if it's not https-able."""
+    if not url:
+        return ""
+    m = re.match(r"^(?:git@|https?://|ssh://)(?:[^@/]+@)?([^:/]+)[:/](.+?)(?:\.git)?$", url)
+    if not m:
+        return ""
+    host, path = m.groups()
+    if "." not in host and host != "localhost":
+        return ""
+    return f"https://{host}/{path.strip('/')}"
+
+def default_branch(cwd):
+    out = git(cwd, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if out:
+        return out.replace("refs/remotes/origin/", "")
+    for cand in ("main", "master"):
+        if git(cwd, "show-ref", "--verify", "--quiet", f"refs/remotes/origin/{cand}"):
+            return cand
+    return "main"
+
+def for_each_ref(cwd, refs, atoms, default):
+    """Run one for-each-ref with the given atoms, returning parsed rows.
+
+    Fields are separated by `%00` (a real NUL in output, a text placeholder
+    in argv — git translates it). One record per line; the trailing field
+    carries the newline. Callers that need the default-relative comparison
+    pass atoms containing `%(ahead-behind:origin/DB)`, replaced here with
+    the actual default branch.
+    """
+    fmt = "%00".join(atoms)
+    fmt = fmt.replace("origin/DB", f"origin/{default}")
+    rc, out, _ = run(["git", "-C", cwd, "for-each-ref", "--format", fmt, refs])
+    if rc != 0 or not out:
+        return []
+    n = len(atoms)
+    rows = []
+    for line in out.splitlines():
+        fields = line.split("\0")
+        if len(fields) != n:
+            continue  # malformed record (e.g. ahead-behind errored)
+        rows.append(fields)
+    return rows
+
+def status_counts(path):
+    """(staged, unstaged, untracked) via porcelain -z."""
+    rc, out, _ = run(["git", "-C", path, "status", "--porcelain=v1", "-z"])
+    if rc != 0 or not out:
+        return (0, 0, 0)
+    staged = unstaged = untracked = 0
+    for entry in out.split("\0"):
+        if not entry:
+            continue
+        xy = entry[:2]
+        if xy[0] == "?":
+            untracked += 1
+        else:
+            if xy[0] not in ". ":
+                staged += 1
+            if xy[1] not in ". ":
+                unstaged += 1
+    return (staged, unstaged, untracked)
+
+def upstream_ahead_behind(cwd, upstream, branch):
+    """(ahead, behind) of a branch vs its own upstream, via left-right."""
+    out = git(cwd, "rev-list", "--left-right", "--count", f"{upstream}...{branch}")
+    parts = out.split()
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        return int(parts[0]), int(parts[1])
+    return 0, 0
+
+def days_since(when):
+    """Days since an ISO timestamp, or None when unparseable."""
+    if not when:
+        return None
+    try:
+        dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        return round((datetime.now(timezone.utc) - dt).total_seconds() / 86400, 1)
+    except ValueError:
+        return None
+
+def parse_ahead_behind(raw):
+    """(ahead, behind) from a `%(ahead-behind:ref)` field ("21 0")."""
+    parts = (raw or "").strip().split()
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        return None
+    return int(parts[0]), int(parts[1])
+
+def scan_repo(root):
+    entry = {"root": root}
+    toplevel = git_root_of(root)
+    if not toplevel:
+        entry["error"] = "not a git repository"
+        return entry
+    if not os.path.isdir(toplevel):
+        entry["error"] = "path missing"
+        return entry
+
+    entry["root"] = toplevel
+    entry["name"] = os.path.basename(toplevel)
+    entry["remote"] = git(toplevel, "remote", "get-url", "origin")
+    entry["web"] = web_url_of_remote(entry["remote"])
+    db = entry["default_branch"] = default_branch(toplevel)
+
+    has_default = run(["git", "-C", toplevel, "show-ref", "--verify", "--quiet",
+                      f"refs/remotes/origin/{db}"])[0] == 0
+    # When the default ref is missing (empty clone, no origin), the
+    # ahead-behind atom would fail the whole call — drop it entirely.
+    head_atoms = [a for a in HEAD_ATOMS
+                  if a != "%(ahead-behind:origin/DB)" or has_default]
+    head_rows = for_each_ref(toplevel, "refs/heads/", head_atoms, db)
+    heads = {}
+    for row in head_rows:
+        branch = row[0]
+        heads[branch] = {
+            "branch": branch,
+            "upstream_ref": row[1] or "",
+            "head": row[2],
+            "head_short": row[2][:12],
+            "last_commit_at": row[3] or "",
+            "subject": row[4] or "",
+            "worktree": row[5] or "",
+        }
+        if has_default and len(row) > 6:
+            ab = parse_ahead_behind(row[6])
+            if ab:
+                heads[branch]["vs_default"] = ab
+
+    def default_rel(branch_data):
+        ab = branch_data.get("vs_default")
+        if ab is None:
+            return (None, False)  # no default ref to compare against
+        return (ab[0], ab[0] == 0)  # (commits_since_default, merged)
+
+    # Remote-tracking branches — the remote_only set.
+    remote_atoms = [a.replace("origin/DB", f"origin/{db}")
+                    for a in REMOTE_ATOMS
+                    if not a.startswith("%(ahead-behind") or has_default]
+    remote_rows = for_each_ref(toplevel, "refs/remotes/origin/", remote_atoms, db)
+    remote_names = set()
+    remote_only = []
+    local_names = set(heads)
+    for row in remote_rows:
+        full, ref, oid = row[0], row[1], row[2]
+        sym = row[3]
+        if full.rstrip("/") == "refs/remotes/origin":
+            continue
+        if sym:
+            continue
+        br = ref.removeprefix("origin/")
+        if br == "HEAD" or br.startswith("pr/"):
+            continue
+        # Every real remote branch counts as "exists on the remote",
+        # including the default branch itself.
+        remote_names.add(br)
+        if br == db or br in local_names:
+            continue
+        item = {"branch": br, "head": oid, "head_short": oid[:12]}
+        if has_default and len(row) > 6:
+            ab = parse_ahead_behind(row[6])
+            item["merged"] = (ab is not None and ab[0] == 0) if ab else False
+            item["commits_since_default"] = ab[0] if ab else 0
+        else:
+            item["merged"] = False
+            item["commits_since_default"] = 0
+        item["subject"] = row[5] or ""
+        item["last_commit_at"] = row[4] or ""
+        item["days_since_last_commit"] = days_since(row[4] or "")
+        remote_only.append(item)
+
+    entry["worktrees"] = []
+    entry["orphans"] = []
+    entry["remote_only"] = remote_only
+
+    worktree_branches = set()
+    for branch, hd in heads.items():
+        wt_path = hd.get("worktree") or ""
+        if not wt_path:
+            continue
+        worktree_branches.add(branch)
+        item = {
+            "path": wt_path,
+            "branch": branch,
+            "is_primary": wt_path == toplevel,
+            "on_remote": branch in remote_names,
+            "head": hd["head"],
+            "head_short": hd["head_short"],
+        }
+        item["subject"] = hd["subject"]
+        item["days_since_last_commit"] = days_since(hd["last_commit_at"])
+
+        staged, unstaged, untracked = status_counts(wt_path)
+        item.update(
+            staged=staged, unstaged=unstaged, untracked=untracked,
+            dirty_files=staged + unstaged + untracked,
+        )
+
+        upstream = hd["upstream_ref"]
+        item["upstream_ref"] = upstream
+        if upstream:
+            item["ahead"], item["behind"] = upstream_ahead_behind(toplevel, upstream, branch)
+        else:
+            item["ahead"], item["behind"] = 0, 0
+        commits_since_default, _ = default_rel(hd)
+        item["commits_since_default"] = commits_since_default if commits_since_default is not None else 0
+
+        if item["dirty_files"]:
+            status = "dirty"
+        elif not upstream:
+            # No upstream: heads can't be ahead of a nonexistent ref — the
+            # ahead (left-right) count is 0, so "new" could never fire and
+            # was removed (dead branch).
+            status = "noupstream"
+        elif item["ahead"]:
+            status = "unpushed"
+        else:
+            status = "idle"
+        item["status"] = status
+        entry["worktrees"].append(item)
+
+    for branch, hd in heads.items():
+        if branch in worktree_branches or branch == db:
+            continue
+        ob = {
+            "branch": branch,
+            "upstream_ref": hd["upstream_ref"],
+            "on_remote": branch in remote_names,
+            "head": hd["head"],
+            "head_short": hd["head_short"],
+        }
+        commits_since_default, merged = default_rel(hd)
+        ob["merged"] = merged
+        ob["commits_since_default"] = commits_since_default if commits_since_default is not None else 0
+        ob.update(subject=hd["subject"], days_since_last_commit=days_since(hd["last_commit_at"]))
+        if not ob["upstream_ref"]:
+            ob["status"] = "merged" if ob["merged"] else "orphan"
+        else:
+            ob["status"] = "merged" if ob["merged"] else "tracked"
+        entry["orphans"].append(ob)
+
+    return entry
+
+def collect_git(repos_override=None):
+    repos = discover_repos(repos_override)
+    seen, unique = set(), []
+    for r in repos:
+        toplevel = git_common_root_of(r) or git_root_of(r)
+        if toplevel and toplevel not in seen:
+            seen.add(toplevel)
+            unique.append(toplevel)
+        elif not toplevel and r not in seen:
+            seen.add(r)
+            unique.append(r)
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "repos": [scan_repo(r) for r in unique],
+    }
+    return payload
+
+# ── gh collection ────────────────────────────────────────────────
+
+def gh(cwd, *args):
+    """Run gh through cohort-gh (host derived from origin remote).
+
+    cohort-gh derives GH_HOST from `git remote get-url origin` in ITS cwd,
+    so we must launch it from the repo root (cwd), not from wherever the
+    server happened to be started.
+    """
+    rc, out, err = run(["cohort-gh", *args], timeout=25, cwd=cwd)
+    return (rc, out, err)
+
+def live_branches(repo):
+    """Branch names that exist on the origin remote right now.
+
+    refs/remotes/origin/* goes stale: after a PR merges and its branch is
+    deleted on GitHub, the local remote-tracking ref lingers until a prune,
+    so prep's on_remote (derived from those refs) over-reports branches
+    that would 404. One ls-remote is cheap next to the gh calls we already
+    make and reflects upstream truth.
+
+    Returns None when the check fails (network hiccup, no origin) — callers
+    then keep the prep-derived values rather than guessing.
+    """
+    root = repo.get("root")
+    if not root or not os.path.isdir(root):
+        return None
+    rc, out, _ = run(["git", "-C", root, "ls-remote", "--heads", "origin"], timeout=30)
+    if rc != 0:
+        return None
+    names = {
+        line.split("\t")[-1].removeprefix("refs/heads/")
+        for line in out.splitlines()
+        if "\t" in line
+    }
+    names.discard("")
+    return names
+
+def collect_prs(repo):
+    """Return (data, status) for one repo.
+
+    data is {branch: {…pr fields…}, '__open__': [pr, …], '__web__': url}
+    and status is one of:
+      "ok"       — all gh calls succeeded (web URL + PR list)
+      "degraded" — at least one gh call failed; data may be partial
+                   (web URL falls back to git-derived, PRs may be absent)
+      "skipped"  — COHORT_NO_GH guard set, or no repo root; gh was
+                   deliberately not called (not an error)
+    """
+    if os.environ.get("COHORT_NO_GH"):
+        return {}, "skipped"
+
+    root = repo.get("root")
+    if not root or not os.path.isdir(root):
+        return {}, "skipped"
+
+    result = {}
+    status = "ok"
+    # Canonical web URL first: gh returns the public github.com address even
+    # when the origin remote uses an internal mirror host.
+    rc, out, err = gh(root, "repo", "view", "--json", "url")
+    if rc == 0 and out:
+        try:
+            url = json.loads(out).get("url", "")
+            if url:
+                result["__web__"] = url.rstrip("/")
+        except json.JSONDecodeError:
+            status = "degraded"
+    else:
+        status = "degraded"
+
+    rc, out, err = gh(root, "pr", "list", "--state", "all", "--limit", "100", "--json",
+                      "number,title,state,url,isDraft,headRefName,createdAt,updatedAt,mergeable,additions,deletions")
+    if rc != 0 or not out:
+        return result, "degraded"
+    try:
+        prs = json.loads(out)
+    except json.JSONDecodeError:
+        return result, "degraded"
+
+    open_prs = []
+    for pr in prs:
+        head = pr.get("headRefName", "")
+        if pr.get("state") == "OPEN":
+            open_prs.append(pr)
+        if head:
+            result[head] = pr
+    result["__open__"] = open_prs
+    return result, status
+
+def enrich(entry, pr):
+    """Attach the four pr_* fields the page reads to an entry."""
+    entry["pr_number"] = pr.get("number")
+    entry["pr_state"] = pr.get("state")
+    entry["pr_draft"] = pr.get("isDraft")
+    entry["pr_url"] = pr.get("url")
+
+def recency_band(days):
+    """0,1,2,3 for <1d, <3d, <7d, older — the recency ladder."""
+    if days is None:
+        return 3
+    if days < 1:
+        return 0
+    if days < 3:
+        return 1
+    if days < 7:
+        return 2
+    return 3
+
+def urgency_key(entry):
+    """Sort key: lower = more urgent. See dashboard-design.md "Row
+    ordering". Must mirror the page's rowUrgency:
+      0 open PR ready, 1 open PR draft, 2 dirty/unpushed,
+      3 clean (band 0..3 -> 3..6), 9 merged/deleted.
+    """
+    pr_state = entry.get("pr_state") or ""
+    if pr_state == "OPEN":
+        return 1 if entry.get("pr_draft") else 0
+    if entry.get("dirty_files") or entry.get("ahead"):
+        return 2
+    if pr_state == "MERGED" or entry.get("deleted") or entry.get("merged"):
+        return 9
+    return 3 + recency_band(entry.get("days_since_last_commit"))
+
+def sort_groups(repo):
+    """Order every row by urgency, recency second — server-side, so
+    /api/data reflects the same ordering the page paints. Enrichment has
+    already run and is what fills pr_state/merged; orphan/remote-only
+    groups are mostly history and sink together."""
+    def key(entry):
+        days = entry.get("days_since_last_commit")
+        return (urgency_key(entry),
+                days if days is not None else float("inf"))
+    for group in (repo.get("worktrees", []),
+                  repo.get("orphans", []),
+                  repo.get("remote_only", [])):
+        group.sort(key=key)
+    # Open PRs: drafts after ready, then most recently updated first.
+    open_prs = repo.get("open_prs", [])
+    def _ts(p):
+        raw = p.get("updatedAt") or p.get("createdAt") or ""
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    open_prs.sort(key=lambda p: ((1 if p.get("isDraft") else 0), -_ts(p)))
+
+def status_after_reconcile(entry):
+    """Map a worktree to the page's final status vocabulary.
+
+    collect_git's status only knows what local git refs say ("idle",
+    "noupstream", "unpushed", "dirty") — a clean branch whose
+    remote-tracking ref lingers (merged PR, branch deleted upstream) looks
+    "idle" and a never-pushed branch "noupstream", neither of which the
+    page knows. This is applied unconditionally in collect_gh: once
+    live-branch reconciliation has run, on_remote/deleted reflect reality;
+    when it was skipped (COHORT_NO_GH) or failed (ls-remote timeout),
+    on_remote/deleted keep the ref-derived values and the label is what
+    they claim:
+
+      dirty       uncommitted changes (unchanged)
+      unpushed    ahead of upstream (unchanged)
+      deleted     was on the remote, no longer is (merged then removed)
+      up to date  clean, exists on the remote
+      local       clean, never pushed / no upstream
+
+    Only worktrees are reclassified; orphans/remote-only keep their own
+    status semantics.
+    """
+    if entry.get("dirty_files"):
+        return "dirty"
+    if entry.get("ahead"):
+        return "unpushed"
+    if entry.get("deleted"):
+        return "deleted"
+    if entry.get("on_remote"):
+        return "up to date"
+    return "local"
+
+def collect_gh(payload):
+    """Enrich git facts with gh PR data; set the failure contract.
+
+    payload["pr_enriched"] is True only when EVERY repo's gh calls
+    succeeded. If any repo degraded (gh failed) or was skipped (guard / no
+    root), it is False. payload["pr_error"] carries a human-readable
+    reason when at least one repo degraded, and is None when everything
+    was ok or when gh was deliberately skipped (COHORT_NO_GH) — skipping
+    is not an error (design doc: pr_error is null when gh was skipped).
+    """
+    statuses = []
+    errors = []
+    for repo in payload.get("repos", []):
+        prs, status = collect_prs(repo)
+        statuses.append(status)
+        # Canonical public web URL from gh (see collect_prs): the browser
+        # links must point at the real GitHub domain, not an internal
+        # mirror host derived from the git remote.
+        web = prs.get("__web__")
+        if web:
+            repo["web"] = web
+        if status == "degraded":
+            errors.append(repo.get("name", repo.get("root", "?")))
+        # Reconcile on_remote against the actual live branches: refs/
+        # remotes/origin/* can hold refs whose upstream branch was deleted
+        # (merged PR heads). Those must be struck through, not linked.
+        # Skipped mode (COHORT_NO_GH) means "don't talk to GitHub", and
+        # ls-remote is a network round-trip — skip it there too and keep
+        # collect_git's ref-derived values (stale at worst).
+        live = None if status == "skipped" else live_branches(repo)
+        for label, group in (("worktrees", repo.get("worktrees", [])),
+                             ("orphans", repo.get("orphans", [])),
+                             ("remote_only", repo.get("remote_only", []))):
+            for entry in group:
+                existed = entry.get("on_remote", False)
+                if live is not None:
+                    entry["on_remote"] = entry.get("branch", "") in live
+                    if label == "remote_only":
+                        # remote_only entries are remote-tracking refs by
+                        # definition — if the live check no longer sees
+                        # them, the branch was deleted on the remote.
+                        deleted = not entry["on_remote"]
+                    else:
+                        # Deleted = was on the remote but isn't anymore
+                        # (struck through). Local-only branches (never
+                        # pushed, no upstream) get no link and no
+                        # decoration.
+                        deleted = bool(existed) and not entry["on_remote"]
+                    entry["deleted"] = deleted
+                # Reclassification is unconditional: the page only knows
+                # the final status vocabulary. Without live data (gh
+                # skipped or ls-remote failed) on_remote is the stale
+                # ref-derived value and deleted stays unknown, but the
+                # label vocabulary never leaks collect_git's
+                # intermediate "idle"/"noupstream"/"new" intermediates.
+                if label == "worktrees":
+                    entry["status"] = status_after_reconcile(entry)
+        for group in (repo.get("worktrees", []),
+                      repo.get("orphans", []),
+                      repo.get("remote_only", [])):
+            for entry in group:
+                pr = prs.get(entry.get("branch", ""))
+                if pr:
+                    enrich(entry, pr)
+        repo["open_prs"] = prs.get("__open__", [])
+        sort_groups(repo)
+    payload["pr_enriched"] = all(s == "ok" for s in statuses)
+    payload["pr_error"] = (
+        "gh failed for: " + "; ".join(errors) if errors else None
+    )
+    return payload
+
+def full_payload(repos_override=None):
+    """Collect git facts, then enrich with gh PR data.
+
+    gh can be slow or fail; the dashboard degrades to git-only data with
+    pr_enriched=false + pr_error set instead of 500ing (see design doc
+    "Failure handling"). collect_gh sets that contract for ordinary gh
+    failures; this wrapper only catches unexpected exceptions (a bug in
+    the collector itself), which would otherwise crash the server.
+    """
+    data = collect_git(repos_override)
+    try:
+        collect_gh(data)
+    except Exception as exc:  # noqa: BLE001 — report, don't crash the server
+        data["pr_enriched"] = False
+        data["pr_error"] = str(exc)[:300]
+    return data
+
+
+# ── data cache ───────────────────────────────────────────────────────────
+
+class DataCache:
+    """Thin TTL cache around the collect pipeline.
+
+    gh is slow (network); git is fast. The dashboard refreshes often, so
+    cache the combined payload for a few seconds.
+    """
+
+    def __init__(self, ttl=DEFAULT_REFRESH, repos_file=None):
+        self.ttl = ttl
+        self._repos_file = repos_file
+        self._lock = threading.Lock()
+        self._data = None
+        self._at = 0.0
+
+    def _collect(self):
+        data = full_payload(self._repos_file)
+        data["collected_at"] = datetime.now(timezone.utc).isoformat()
+        data["refresh_interval_ms"] = self.ttl * 1000
+        return data
+
+    def get(self):
+        now = time.monotonic()
+        with self._lock:
+            bucket, at = self._data, self._at
+            if bucket is not None and now - at < self.ttl:
+                return bucket
+        data = self._collect()
+        with self._lock:
+            self._data, self._at = data, now
+        return data
+
+# ── HTML ─────────────────────────────────────────────────────────────────
+
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cohort dashboard</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #171c23; --panel2: #1d242d;
+    --text: #e6e9ee; --muted: #8b949e; --line: #2a323d;
+    --accent: #4f8cff; --green: #3fb950; --yellow: #d29922;
+    --red: #f85149; --purple: #a371f7; --cyan: #39c5cf;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 18px 28px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0;
+    background: rgba(15,20,25,.92); backdrop-filter: blur(6px); z-index: 5;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; align-items: center; }
+  .meta .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 5px; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 22px 28px 60px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin: 28px 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--panel2); }
+  .branch { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  .dead { color: var(--muted); opacity: .7; }
+  .subj { color: var(--muted); font-size: 12.5px; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px;
+    border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .3px;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge.green { color: var(--green); border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.08); }
+  .badge.yellow { color: var(--yellow); border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.08); }
+  .badge.red { color: var(--red); border-color: rgba(248,81,73,.4); background: rgba(248,81,73,.08); }
+  .badge.purple { color: var(--purple); border-color: rgba(163,113,247,.4); background: rgba(163,113,247,.08); }
+  .badge.cyan { color: var(--cyan); border-color: rgba(57,197,207,.4); background: rgba(57,197,207,.08); }
+  .badge.gray { color: var(--muted); border-color: var(--line); background: transparent; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11.5px;
+    background: var(--panel2); border: 1px solid var(--line); color: var(--muted); font-family: ui-monospace, monospace;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .prlink { display: inline-flex; align-items: center; gap: 6px; }
+  .prlink .num { font-weight: 650; }
+  .draft-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .empty { color: var(--muted); padding: 18px 0; text-align: center; }
+  .err { color: var(--red); }
+  footer { color: var(--muted); font-size: 11.5px; margin-top: 30px; }
+  @media (max-width: 720px) {
+    .meta { flex-wrap: wrap; }
+    th.dirty-h, td.dirty-c { display: none; }
+    .wrap { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>◧ cohort dashboard</h1>
+  <span class="sub">worktrees &amp; pull requests</span>
+  <div class="spacer"></div>
+  <div class="meta">
+    <span id="updated"><span class="dot"></span>loading…</span>
+    <span id="repocount"></span>
+  </div>
+</header>
+<div class="wrap">
+  <div id="repo-views"></div>
+  <footer>Auto-refreshes every <span id="refresh-note">30s</span> · data collected from local git + <code>gh</code> · cohort engine</footer>
+</div>
+<script>
+const fmt = {
+  age(d) {
+    if (d == null) return '—';
+    if (d < 1) return Math.round(d * 24) + 'h';
+    if (d < 30) return d + 'd';
+    return Math.round(d / 30) + 'mo';
+  },
+  time(iso) {
+    if (!iso) return '';
+    const dt = new Date(iso);
+    return dt.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  },
+  esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+};
+
+// GitHub web links — repo.web is the canonical public URL, resolved by gh
+// (repo view url) and falling back to the origin-derived base when gh is off.
+// Paths are URL-encoded so branch names like "feature/foo" stay valid.
+function treeUrl(repo, branch) { return repo.web ? `${repo.web}/tree/${encodeURIComponent(branch)}` : ''; }
+function commitUrl(repo, sha)   { return repo.web ? `${repo.web}/commit/${encodeURIComponent(sha)}` : ''; }
+function compareUrl(repo, base, head) {
+  return repo.web ? `${repo.web}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}` : '';
+}
+
+// gh returns PR URLs on the canonical github.com host even when we're on an
+// int mirror; the page only reaches the right UI if the host matches the
+// repo's origin, so re-home any URL that has a different host.
+function prUrl(repo, raw) {
+  if (!raw || !repo.web) return '';
+  try {
+    const u = new URL(raw);
+    const w = new URL(repo.web);
+    if (u.host !== w.host) u.host = w.host;
+    return u.toString();
+  } catch { return raw; }
+}
+
+function branchCell(repo, name, opts = {}) {
+  const onRemote = opts.onRemote !== false;  // default: assume it exists
+  const url = onRemote ? (opts.url || treeUrl(repo, name)) : '';
+  const inner = fmt.esc(name);
+  const suffix = opts.suffix ? ` ${opts.suffix}` : '';
+  const sub = opts.sub ? `<div class="subj">${opts.sub}</div>` : '';
+  if (url) {
+    return `<td class="branch"><a href="${url}" target="_blank" rel="noopener">${inner}</a>${suffix}${sub}</td>`;
+  }
+  // Not on the remote: nothing to link to. Deleted branches (were on the
+  // remote, no longer are) render grey so the operator can see they once
+  // existed; local-only branches just render plain — no link, no
+  // decoration.
+  if (opts.deleted) {
+    return `<td class="branch dead">${inner}${suffix}${sub}</td>`;
+  }
+  return `<td class="branch">${inner}${suffix}${sub}</td>`;
+}
+
+function statusBadge(wt, repo) {
+  const map = {
+    dirty:    ['red',   'dirty'],
+    unpushed: ['yellow','unpushed'],
+    deleted:  ['gray',   'deleted'],
+    'up to date': ['green', 'up to date'],
+    local:    ['purple', 'local'],
+  };
+  const [cls, txt] = map[wt.status] || ['gray', wt.status];
+  // Make the pill itself link to the GitHub page that explains it:
+  //   dirty/unpushed → compare default...branch (what's ahead)
+  //   up to date → the tree (nothing to compare)
+  //   local (never pushed) → no page exists; no link
+  //   deleted → no tree page (branch is gone); PR links if present
+  let href = '';
+  if (repo && repo.web && wt.on_remote !== false) {
+    if (wt.pr_number) href = prUrl(repo, wt.pr_url);
+    else if (wt.status === 'unpushed' || wt.status === 'dirty')
+      href = compareUrl(repo, repo.default_branch, wt.branch);
+    else href = treeUrl(repo, wt.branch);
+  } else if (wt.deleted && repo && repo.web && wt.pr_number) {
+    href = prUrl(repo, wt.pr_url);
+  }
+  const span = `<span class="badge ${cls}">${txt}</span>`;
+  return href ? `<a href="${href}" target="_blank" rel="noopener">${span}</a>` : span;
+}
+
+function prBadge(wt, repo) {
+  if (!wt.pr_number) return '<span class="pill gray">no PR</span>';
+  const st = wt.pr_state === 'OPEN' ? 'green' : 'gray';
+  const draft = wt.pr_draft ? ' ✎' : '';
+  const href = prUrl(repo, wt.pr_url) || fmt.esc(wt.pr_url || '#');
+  return `<a class="prlink" href="${href}" target="_blank" rel="noopener">
+    <span class="badge ${st}">#${wt.pr_number}${draft}</span></a>`;
+}
+
+function prRow(pr, repo) {
+  const head = pr.headRefName || '';
+  const headCell = repo ? branchCell(repo, head) : `<td class="branch">${fmt.esc(head)}</td>`;
+  const href = prUrl(repo, pr.url) || fmt.esc(pr.url || '#');
+  return `<tr>${headCell}
+    <td><span class="badge green">#${pr.number} OPEN</span></td>
+    <td><a href="${href}" target="_blank" rel="noopener">${fmt.esc(pr.title)}</a>
+      ${pr.isDraft ? '<span class="draft-dot" title="draft"></span>' : ''}</td>
+    <td>+${pr.additions ?? 0}/−${pr.deletions ?? 0}</td>
+    <td>${fmt.esc(pr.mergeable || '')}</td>
+    <td>${fmt.time(pr.createdAt)}</td></tr>`;
+}
+
+function render(data) {
+  const updated = document.getElementById('updated');
+  updated.innerHTML = `<span class="dot"></span>updated ${fmt.time(data.collected_at || data.generated_at)}`;
+  const note = document.getElementById('refresh-note');
+  if (note && data.refresh_interval_ms) {
+    note.textContent = (data.refresh_interval_ms / 1000) + 's';
+  }
+
+  const views = (data.repos || []).map(repo => {
+    // The server (sort_groups) has already ordered every group — active PRs
+    // first, merged/deleted at the tail. Rows are rendered in payload order.
+    const wts = repo.worktrees || [];
+    const orphans = (repo.orphans || [])
+      .filter(o => o.status === 'merged' || o.status === 'orphan');
+    const open = repo.open_prs || [];
+    const remoteOnly = repo.remote_only || [];
+    const rows = wts.map(wt => `
+      <tr>
+        ${branchCell(repo, wt.branch, {
+          onRemote: wt.on_remote,
+          deleted: !!wt.deleted,
+          sub: wt.subject && !wt.is_primary ? fmt.esc(wt.subject) : '',
+          suffix: wt.is_primary ? '<span class="pill" title="primary checkout">main</span>' : ''
+        })}
+        <td>${statusBadge(wt, repo)}</td>
+        <td>${wt.dirty_files ? `${wt.staged}+${wt.unstaged}/~${wt.untracked} <span class="pill">${wt.dirty_files} files</span>` : '<span class="pill gray">clean</span>'}</td>
+        <td>${wt.behind ? `<span class="err">▼${wt.behind}</span>` : ''}${wt.ahead ? `<a href="${compareUrl(repo, repo.default_branch, wt.branch)}" target="_blank" rel="noopener"><span class="badge yellow">▲${wt.ahead}</span></a>` : ''} ${wt.commits_since_default ? `<span class="pill">+${wt.commits_since_default}</span>` : ''}</td>
+        <td>${fmt.age(wt.days_since_last_commit)} ago</td>
+        <td>${prBadge(wt, repo)}</td>
+        <td>${wt.head_short ? (wt.on_remote || wt.deleted ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : `<span>${fmt.esc(wt.head_short)}</span>`) : ''}</td>
+      </tr>`).join('');
+    const orphanRows = orphans.map(o => `
+      <tr>
+        ${branchCell(repo, o.branch, { onRemote: o.on_remote, deleted: !!o.deleted })}
+        <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.status === 'merged' ? 'merged' : 'orphan'}</span>`}</td>
+        <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
+        <td>${fmt.age(o.days_since_last_commit)} ago</td>
+        <td colspan="2">${o.head_short ? (o.on_remote || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : ''}</td>
+      </tr>`).join('');
+    const remoteRows = (repo.remote_only || []).map(o => `
+      <tr>
+        ${branchCell(repo, o.branch, { onRemote: o.on_remote !== false, deleted: !!o.deleted })}
+        <td>${o.pr_number ? prBadge(o, repo) : `<span class="badge purple">${o.merged ? 'merged' : 'remote'}</span>`}</td>
+        <td colspan="2"><span class="subj">${fmt.esc(o.subject || '')}</span></td>
+        <td>${fmt.age(o.days_since_last_commit)} ago</td>
+        <td colspan="2">${o.head_short ? (o.on_remote !== false || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : ''}</td>
+      </tr>`).join('');
+    const prRows = open.map(pr => prRow(pr, repo)).join('');
+    return `
+      <h2>${fmt.esc(repo.name)} <span class="sub">· ${fmt.esc(repo.root)}</span></h2>
+      <table>
+        <thead><tr><th>branch</th><th>state</th><th>changes</th><th>vs origin</th><th>age</th><th>PR</th><th>head</th></tr></thead>
+        <tbody>${rows || '<tr><td class="empty" colspan="7">no worktrees</td></tr>'}</tbody>
+      </table>
+      ${open.length ? `
+        <h2>Open pull requests</h2>
+        <table><thead><tr><th>branch</th><th>state</th><th>title</th><th>diff</th><th>mergeable</th><th>created</th></tr></thead>
+        <tbody>${prRows}</tbody></table>` : ''}
+      ${remoteOnly.length ? `
+        <h2>Remote branches without local worktrees</h2>
+        <table><thead><tr><th>branch</th><th>state</th><th>subject</th><th>age</th><th></th></tr></thead>
+        <tbody>${remoteRows}</tbody></table>` : ''}
+      ${orphans.length ? `
+        <h2>Branches without worktrees</h2>
+        <table><thead><tr><th>branch</th><th>state</th><th>subject</th><th>age</th><th></th></tr></thead>
+        <tbody>${orphanRows}</tbody></table>` : ''}`;
+  }).join('');
+  document.getElementById('repo-views').innerHTML = views;
+  document.getElementById('repocount').textContent = `${(data.repos || []).length} repo${(data.repos || []).length === 1 ? '' : 's'}`;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/data');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    render(data);
+  } catch (e) {
+    document.getElementById('updated').innerHTML = `<span class="dot" style="background:var(--red)"></span>error: ${fmt.esc(e.message)}`;
+  }
+}
+
+refresh();
+// Refresh interval comes from the payload (server --refresh owner), falling
+// back to 30s when absent (e.g. an older cached payload).
+const poll = async () => {
+  try {
+    const r = await fetch('/api/data');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } catch (e) {
+    document.getElementById('updated').innerHTML = `<span class="dot" style="background:var(--red)"></span>error: ${fmt.esc(e.message)}`;
+    return null;
+  }
+};
+
+(async () => {
+  const data = await poll();
+  if (data) render(data);
+  setInterval(poll, Number(data && data.refresh_interval_ms) || 30000);
+})();
+</script>
+</body>
+</html>
+"""
+
+# ── server ────────────────────────────────────────────────────────────────
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "cohort-dashboard/1"
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/healthz":
+            self._send(200, b"ok", "text/plain")
+            return
+        if path == "/api/data":
+            try:
+                data = _cache.get()
+                body = json.dumps(data).encode()
+                self._send(200, body)
+            except Exception as exc:  # noqa: BLE001 — report, don't crash the server
+                self._send(500, json.dumps({"error": str(exc)}).encode())
+            return
+        if path == "/":
+            self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+            return
+        self._send(404, b"not found", "text/plain")
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
+
+def serve(bind, port, refresh, repos_file=None):
+    global _cache
+    _cache = DataCache(ttl=refresh, repos_file=repos_file)
+    srv = ThreadingHTTPServer((bind, port), Handler)
+    print(f"cohort dashboard on http://{bind}:{port} (refresh {refresh}s)")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+def main():
+    port = _load_port_config()
+    refresh = DEFAULT_REFRESH
+    bind = DEFAULT_BIND
+    json_only = False
+    repos_file = None
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--port" and i + 1 < len(args):
+            port = int(args[i + 1]); i += 2
+        elif args[i] == "--refresh" and i + 1 < len(args):
+            refresh = int(args[i + 1]); i += 2
+        elif args[i] == "--bind" and i + 1 < len(args):
+            bind = args[i + 1]; i += 2
+        elif args[i] == "--repos" and i + 1 < len(args):
+            repos_file = args[i + 1]; i += 2
+        elif args[i] == "--json-only":
+            json_only = True; i += 1
+        else:
+            i += 1
+    if json_only:
+        print(json.dumps(full_payload(repos_file), indent=2))
+        return
+    serve(bind, port, refresh, repos_file)
+
+if __name__ == "__main__":
+    main()
+
