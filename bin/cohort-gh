@@ -42,4 +42,50 @@ if [[ -n "${GH_HOST:-}" && "$GH_HOST" != "$host" ]]; then
     exit 2
 fi
 
-GH_HOST="$host" exec gh "$@"
+# Cold-start retry. The exe.dev edge proxy idles out, and the first request
+# after a quiet period fails while it warms back up; a second attempt a
+# second later goes through. Two signatures are treated as transient:
+#
+#   - HTTP 502/503/504 — what gh reports while the edge is still warming.
+#   - "integration not found or not attached to this VM" — the proxy's own
+#     cold-start body, which it returns with a 403.
+#
+# The 403 is matched on that sentence, never on the status: the proxy only
+# routes repo-scoped paths, so `/` and `/user` 403 BY DESIGN and permanently
+# (docs/cohort-gh.md). Retrying those would burn three seconds to reprint the
+# same error. Anything that doesn't match either signature fails on the first
+# attempt, as before.
+transient_error='HTTP (502|503|504)|integration not found or not attached to this VM'
+attempts=3
+delay=1
+
+# gh's stdout is data (`cohort-gh pr list`), so it is buffered rather than
+# sampled: a retry must not emit the failed attempt's partial output ahead of
+# the real one. Both streams are replayed verbatim below, on success and on
+# failure alike. The tradeoff: gh sees a non-TTY stdout, so it drops the pager
+# and colour, and refuses to prompt — an invocation that relies on interactive
+# prompts must pass its arguments as flags instead.
+stdout_buf=$(mktemp) || exit 1
+stderr_buf=$(mktemp) || exit 1
+trap 'rm -f "$stdout_buf" "$stderr_buf"' EXIT
+
+for (( attempt = 1; attempt <= attempts; attempt++ )); do
+    status=0
+    GH_HOST="$host" gh "$@" >"$stdout_buf" 2>"$stderr_buf" || status=$?
+
+    (( status == 0 )) && break
+    (( attempt == attempts )) && break
+    # Only the diagnosis stream votes on retrying. Matching gh's stdout too
+    # would let a PR body that quotes "HTTP 503" trigger a pointless retry.
+    [[ $(< "$stderr_buf") =~ $transient_error ]] || break
+
+    echo "cohort-gh: transient edge failure (cold start); retrying in ${delay}s (attempt $(( attempt + 1 ))/${attempts})" >&2
+    sleep "$delay"
+    delay=$(( delay * 2 ))
+done
+
+# Replay gh's own output and exit status. On a final failure the user sees
+# gh's real error, not a summary of it.
+cat "$stdout_buf"
+cat "$stderr_buf" >&2
+exit "$status"
