@@ -7,13 +7,30 @@
 # tooling finds it at a predictable path while keeping the repo visible.
 #
 # Usage: ~/.cohort/bin/cohort-init [project-name]
+#          [--dashboard-port PORT]
 #   project-name defaults to the current directory's basename.
+#   --dashboard-port   port for `cohort-dashboard` (default: 6283)
 set -e
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 ENGINE_ROOT=$(dirname "$SCRIPT_DIR")
 PROJECT_ROOT="$PWD"
-PROJECT_NAME="${1:-$(basename "$PROJECT_ROOT")}"
+DASHBOARD_PORT=6283
+PROJECT_NAME=""
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dashboard-port)
+            DASHBOARD_PORT="$2"; shift 2 ;;
+        *)
+            if [[ -z "$PROJECT_NAME" ]]; then
+                PROJECT_NAME="$1"
+            fi
+            shift ;;
+    esac
+done
+PROJECT_NAME="${PROJECT_NAME:-$(basename "$PROJECT_ROOT")}"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "Error: not inside a git repository. Run this from a project root." >&2
@@ -24,7 +41,21 @@ echo "Bootstrapping Cohort for $PROJECT_NAME..."
 echo "  Engine: $ENGINE_ROOT"
 echo "  Project: $PROJECT_ROOT"
 
-# 1. Skip scaffolding when in the engine repo itself
+# 1. Write dashboard config (~/.config/cohort-dashboard/config).
+#    Only the port is used — the dashboard serves relative paths that
+#    resolve against whatever origin the browser loaded the page from,
+#    so a domain is never written here (see dashboard-design.md).
+CONFIG_DIR="$HOME/.config/cohort-dashboard"
+mkdir -p "$CONFIG_DIR"
+cat > "$CONFIG_DIR/config" <<CONFEOF
+{
+  "port": $DASHBOARD_PORT
+}
+CONFEOF
+echo "Dashboard config: $CONFIG_DIR/config"
+echo "  port  : $DASHBOARD_PORT"
+
+# 2. Skip scaffolding when in the engine repo itself
 ENGINE_REAL=$(readlink -f "$ENGINE_ROOT")
 PROJECT_REAL=$(readlink -f "$PROJECT_ROOT")
 if [[ "$ENGINE_REAL" == "$PROJECT_REAL" ]]; then
@@ -48,7 +79,7 @@ PROMPTEOF
     fi
 fi
 
-# 2. Install the shelley hook(s)
+# 3. Install the shelley hook(s)
 HOOK_SRC="$ENGINE_ROOT/hooks/system-prompt"
 HOOK_DST="$HOME/.config/shelley/hooks/system-prompt"
 mkdir -p "$(dirname "$HOOK_DST")"

@@ -171,6 +171,66 @@ script that does one job clearly beats three Python scripts with
 duplicated boilerplate, regardless of whether any of them could have
 been sed or jq.
 
+## Ask whether an earlier owner already knows the answer
+
+When you see a piece of config, a template, a parameterized value, a
+function, a method, or a helper that needs a "render", "substitute",
+"derive", or "recompute" step to be usable, stop and ask: where does
+the final value actually first become known, and is that point an
+*earlier step in this same execution*? If so, generate or compute the
+concrete thing there instead of shipping a placeholder that some later
+program, caller, or reader must rewrite.
+
+This applies well beyond config templating. Ask it of any boundary
+where a value is passed forward for a *later* party to reproduce:
+
+- A method that recomputes a value its caller already holds, because
+  the two call sites couldn't agree on who owns it.
+- A helper whose inputs are only correct if every caller performs the
+  same pre-step, when that pre-step could live inside the helper.
+- A class that stores the *input* to a derivation while also storing
+  the derived value, letting the two drift out of sync.
+
+Signs that the earlier-owner principle applies, in config-shape terms:
+
+- A template whose placeholders (`%u`, `%h`, `${USER}`, a config key)
+  can never be resolved by the tool that reads them, so a *separate*
+  script must string-substitute them before use — with escaping, empty
+  guards, and "which user" logic for every possible invocation.
+- The values being substituted are already known to the very installer
+  that would do the substitution — e.g. an install script that knows
+  `$HOME`/`$USER` but renders a unit with `User=%u`, then later resolves
+  `%u` back to the same user it already had.
+- A committed template file whose only consumer is a post-processor
+  that makes it correct. The file doesn't run standalone; it's a broken
+target waiting to be patched.
+
+The fix is usually **deletion of the indirection**: write the literal
+value at the point where it's known, and delete the placeholder + the
+renderer. Concrete example: a systemd unit shipped as `bin/*.service`
+with `User=%u`/`%h`, which systemd resolves to *root* for a system
+unit — so install.sh had to sed-substitute the real user/home, escape
+`&/\` in sed delimiters, guard against empty renders, and re-derive the
+user from `SUDO_USER`/`id`. But install.sh had `$HOME`/`$USER` at the
+top of the script. The whole template+escape+guard machinery existed
+only to express "the user I already am." Generating the unit inline
+from `$DASH_USER`/`$DASH_HOME` and deleting the committed template
+removed the entire category.
+
+The same fix can apply when a derivable value is passed forward:
+callers stop carrying the input, the helper keeps the derivation, and
+the two-stop dance disappears.
+
+Caveat: this is not an argument against all templating or all
+parameters. The check is whether the *consumer* can resolve the
+placeholder itself, or whether the caller genuinely chooses the value.
+If the tool reading the config naturally expands it (shell `${VAR:-}`,
+openssl envsubst, systemd's own specifiers where they resolve
+correctly), the placeholder is fine; if the caller varies the value per
+invocation, the parameter is fine. The target is a placeholder that is
+*guaranteed wrong* until an unrelated program rewrites it, or a value
+passed forward that its recipient could derive — or already has.
+
 ## Try an alternative-approaches pass
 
 After the first findings pass, step back and ask: is there a

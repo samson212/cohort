@@ -1,0 +1,14 @@
+[Unit]
+Description=Cohort worktree & PR dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.cohort/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=%h/.cohort/bin/cohort-dashboard --refresh 30
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -59,6 +59,15 @@ Then, from any project root:
 cohort-init
 ```
 
+The installer also sets up the **dashboard service**: `install.sh` symlinks
+a static systemd **user** unit (`bin/cohort-dashboard.service` with
+`%h`, which a user manager resolves to the invoking user's home) into
+`~/.config/systemd/user/`, enables linger, and starts it via the user
+manager — no root/sudo needed. It then verifies the install by probing
+`/healthz`.
+The dashboard then serves on port 6283 (`http://localhost:6283/`;
+on exe.dev, `https://<vm>.exe.xyz:6283/`).
+
 This scaffolds `.cohort/` and installs the system-prompt hook **and** the
 `/cohort-*` slash hooks (`hooks/slash/cohort`, symlinked once per skill
 name in `skills/`). `cohort-init` writes them into
