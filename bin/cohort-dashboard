@@ -740,6 +740,9 @@ PAGE = """<!doctype html>
   .meta .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 5px; }
   .wrap { max-width: 1200px; margin: 0 auto; padding: 22px 28px 60px; }
   h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); margin: 28px 0 10px; }
+  h2 .count { color: var(--yellow); }
+  .hint { color: var(--muted); font-size: 12px; margin: -4px 0 10px; }
+  .hint code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
   table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; font-weight: 600; }
@@ -916,7 +919,15 @@ function render(data) {
       .filter(o => o.status === 'merged' || o.status === 'orphan');
     const open = repo.open_prs || [];
     const remoteOnly = repo.remote_only || [];
-    const rows = wts.map(wt => `
+    // Worktrees whose PR merged and whose branch was deleted on the remote
+    // are cleanup candidates — they surface in their own section (still
+    // sorted into payload order), not the main worktree table. Both
+    // conditions are required: a deleted-but-unmerged branch can't be
+    // cleaned by cohort-cleanup (its tip isn't on the default branch) and
+    // stays in the main table.
+    const done = wts.filter(wt => wt.status === 'deleted' && wt.pr_state === 'MERGED');
+    const active = wts.filter(wt => !(wt.status === 'deleted' && wt.pr_state === 'MERGED'));
+    const rows = active.map(wt => `
       <tr>
         ${branchCell(repo, wt.branch, {
           onRemote: wt.on_remote,
@@ -930,6 +941,18 @@ function render(data) {
         <td>${fmt.age(wt.days_since_last_commit)} ago</td>
         <td>${prBadge(wt, repo)}</td>
         <td>${wt.head_short ? (wt.on_remote || wt.deleted ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : `<span>${fmt.esc(wt.head_short)}</span>`) : ''}</td>
+      </tr>`).join('');
+    const doneRows = done.map(wt => `
+      <tr>
+        ${branchCell(repo, wt.branch, {
+          onRemote: wt.on_remote,
+          deleted: true,
+          sub: wt.subject && !wt.is_primary ? fmt.esc(wt.subject) : ''
+        })}
+        <td>${prBadge(wt, repo)}</td>
+        <td><span class="pill gray">merged</span></td>
+        <td><span class="subj">tip merged into ${fmt.esc(repo.default_branch)}</span></td>
+        <td>${wt.head_short ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : ''}</td>
       </tr>`).join('');
     const orphanRows = orphans.map(o => `
       <tr>
@@ -954,6 +977,11 @@ function render(data) {
         <thead><tr><th>branch</th><th>state</th><th>changes</th><th>vs origin</th><th>age</th><th>PR</th><th>head</th></tr></thead>
         <tbody>${rows || '<tr><td class="empty" colspan="7">no worktrees</td></tr>'}</tbody>
       </table>
+      ${done.length ? `
+        <h2>Ready to clean up <span class="count">${done.length}</span></h2>
+        <p class="hint">PR merged, branch deleted from the remote — the worktree can be removed with <code>cohort-cleanup</code>.</p>
+        <table><thead><tr><th>branch</th><th>PR</th><th>state</th><th>merged into</th><th>head</th></tr></thead>
+        <tbody>${doneRows}</tbody></table>` : ''}
       ${open.length ? `
         <h2>Open pull requests</h2>
         <table><thead><tr><th>branch</th><th>state</th><th>title</th><th>diff</th><th>mergeable</th><th>created</th></tr></thead>
