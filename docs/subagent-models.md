@@ -8,15 +8,21 @@ conversation is using.
 
 Consequences for how Cohort delegates:
 
-- **Do not pass a `model` parameter when spawning a subagent unless the
-  task genuinely requires a stronger model.** The pinned default is cheap
-  and fast, and it is the intended workhorse for reviews, QA passes, and
-  doc maintenance.
-- **If a task truly needs a heavier model** (deep architectural analysis,
-  resolving a hard merge conflict, writing subtle concurrency code), pass
-  `model="gpt-5.6-sol"` (or another listed model) explicitly. The subagent
-  tool accepts only the models listed in its description; anything else is
-  rejected.
+- **Do NOT pass a `model` parameter when spawning a subagent for routine
+  work.** The pinned default is cheap and fast, and it is the intended
+  workhorse for code reviews, QA passes, doc maintenance, and every other
+  delegation that doesn't genuinely need a heavier model. Passing an
+  explicit `model` for such work is a convention violation.
+- **An explicit `model` is reserved for tasks that truly need it**: deep
+  architectural analysis, resolving a hard merge conflict, writing subtle
+  concurrency code. Even then, the subagent tool accepts only the models
+  listed in its description; anything else is rejected.
+- **Explicit overrides are loud, not silent.** When an agent passes a
+  `model` that differs from the pinned default, Shelley logs a warning
+  (`subagent: explicit model override of pinned default`) containing the
+  pinned default, the chosen model, and the slug. That warning is a
+  deliberate signal: if it fires on routine work, the delegation was
+  wrong. Don't habitually trigger it.
 - **Never call `cohort-model-name` to "pick a subagent model"** — that
   script exists only to stamp the `Co-Authored-By` commit trailer and
   prints the *parent's* model. Subagent model choice is the server
