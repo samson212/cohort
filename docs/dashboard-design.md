@@ -210,6 +210,12 @@ plain: no decoration, they just don't link. Action-required rows render
 their branch, PR badge, action pill, and age — the rest of the row's
 cells are not applicable (clean, not ahead, no tree page).
 
+A branch appears in exactly **one** section: the page lifts
+action-required entries out of their origin tables (worktrees, orphans,
+remote_only) into the "Action required" section, and the origin tables
+hold only non-actionable rows. "Lifts" means removes — one row per
+branch, never the same branch in two tables.
+
 `dirty` wins. If there is a PR for the branch, its PR page is linked
 regardless of status.
 

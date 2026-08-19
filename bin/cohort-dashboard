@@ -974,10 +974,12 @@ function render(data) {
     // The server (sort_groups) has already ordered every group —
     // action-required first, merged/deleted at the tail. Rows are
     // rendered in payload order.
-    const wts = repo.worktrees || [];
+    const wts = (repo.worktrees || []).filter(w => !w.action_required);
+    // Action-required entries are lifted out of their origin tables into
+    // the "Action required" section — one row per branch, never two.
     const orphans = (repo.orphans || [])
-      .filter(o => o.status === 'merged' || o.status === 'orphan');
-    const remoteOnly = repo.remote_only || [];
+      .filter(o => !o.action_required && (o.status === 'merged' || o.status === 'orphan'));
+    const remoteOnly = (repo.remote_only || []).filter(o => !o.action_required);
 
     // Everything that needs the operator's attention, across all three
     // groups. The server builds repo.actions (authoritative ordering);
