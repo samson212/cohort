@@ -42,9 +42,11 @@ one page so an operator can see, at a glance:
 - which worktrees have uncommitted changes (and how many files)
 - which branches are ahead of / behind their upstream or the default branch
 - which PRs are open, draft, or merged for each branch
+- what needs the operator's attention, in one place (an "Action required"
+  section: draft PRs, reviews pending, changes requested, ready to merge,
+  merged-but-lingering worktrees/branches)
 - which branches exist locally but were never pushed (unlinked, no decoration)
-- which branches were deleted from the remote after their PR merged (rendered grey
-  in a dedicated "Ready to clean up" section)
+- which branches were deleted from the remote after their PR merged (rendered grey)
 - which branches exist only on the remote (no local ref, no worktree)
 - which local branches no longer have a worktree (cleanup candidates)
 
@@ -110,7 +112,7 @@ One JSON document per scrape:
       "worktrees": [ … ],              # every checkout, incl. primary
       "orphans": [ … ],                # local branches w/o worktree
       "remote_only": [ … ],            # remote branches w/o local ref
-      "open_prs": [ … ]                # OPEN PRs for the repo
+      "actions": [ … ]                # everything needing attention (merged across groups)
     },
     … # further repos; the Cohort engine repo always sorts LAST
   ]
@@ -176,14 +178,27 @@ or fails, the labels never leak collect_git's intermediate
 | `deleted` | was on the remote, branch removed after merge | PR page, else none |
 
 A worktree with `deleted` status **and a `MERGED` PR** is a cleanup
-candidate: its PR was merged and the branch head was removed upstream, so
-`cohort-cleanup` can remove the worktree. The page collects these into a
-dedicated **"Ready to clean up"** section above the Open-PRs table instead
-of the main worktree table — one glance shows what can be cleaned today.
-A worktree that is `deleted` without a `MERGED` PR (branch removed without
-merging, or gh unavailable) stays in the main table: `cohort-cleanup` would
+candidate, but cleanup isn't the only thing the operator needs to know.
+Instead of a single cleanup section, the page lifts **everything that
+needs attention** across all three groups (worktrees, orphans,
+remote_only) into one **"Action required"** section at the top. Each
+entry carries an `action_required` label from `enrich()`:
+
+| action | meaning |
+|---|---|
+| `mark-ready` | PR open but still in draft — mark it ready for review |
+| `changes-requested` | PR open, review asked for changes — address the review |
+| `awaiting-review` | PR open & ready, no decision yet — get it reviewed |
+| `ready-to-merge` | PR open, review approved — merge it |
+| `merged-cleanup` | PR merged; worktree/branch still exists — run `cohort-cleanup` |
+
+The section replaces the old Open-PRs table (redundant: every open PR's
+head branch maps to a worktree, orphan, or remote_only entry, all of
+which are enriched) and the old cleanup-only section. A `deleted`
+worktree without a `MERGED` PR (branch removed without merging, or gh
+unavailable) stays in the main worktree table: `cohort-cleanup` would
 refuse it (its tip isn't an ancestor of the default branch), so it isn't
-"ready."
+"cleanup-ready."
 | `up to date` | clean, exists on the remote | tree page (or PR) |
 | `local` | clean, never pushed / no upstream | none (unlinked) |
 
@@ -191,10 +206,9 @@ refuse it (its tip isn't an ancestor of the default branch), so it isn't
 deleted from the remote loses its tree/compare links and its name renders
 grey — its PR page (if any) and head-SHA link (the merged commit
 lives in the default branch) still link. `local` branches are unlinked and
-plain: no decoration, they just don't link. Cleanup-candidate rows (the
-"Ready to clean up" section) render their branch grey, their PR badge, a
-"merged" pill, and the target branch they were merged into; the rest of the
-row's cells are not applicable (clean, not ahead, no tree page).
+plain: no decoration, they just don't link. Action-required rows render
+their branch, PR badge, action pill, and age — the rest of the row's
+cells are not applicable (clean, not ahead, no tree page).
 
 `dirty` wins. If there is a PR for the branch, its PR page is linked
 regardless of status.
@@ -367,30 +381,31 @@ their head-SHA link (the merged commit exists in the default branch), but
 lose their tree/compare links. When the ls-remote fails (no origin,
 network hiccup), collect_git's values are kept rather than guessed at.
 
-## Row ordering — urgency first
+## Row ordering — urgency first, action-required on top
 
 Every table is sorted most-immediate first. The ordering is computed
 **in the gh stage** (`sort_groups`, keyed by a per-entry
 `urgency_key`) — `/api/data` is authoritative, and the page renders
 rows exactly in payload order:
 
-1. **Active PRs** (open, ready before draft) — work awaiting review or
-   merge is the closest to done and the first thing to act on.
+1. **Action required** — anything with an `action_required` label
+   surfaces at the top, ordered by blocking severity (`mark-ready` →
+   `changes-requested` → `awaiting-review` → `ready-to-merge` →
+   `merged-cleanup`), recency second. The page renders the cross-group
+   `repo["actions"]` list exactly as the server ordered it.
 2. **In-flight branches without a live PR** — dirty or ahead; next.
 3. **Clean branches with no PR** — ordered by recency bands (<1d, <3d,
    <7d, older): recent commits are important, so hot branches float.
 4. **Merged / deleted-upstream / abandoned** — history, sinking to the
    bottom (the bulk of the `orphans` and `remote_only` lists).
 
-Cleanup candidates (deleted worktrees with merged PRs) sort to the tail of
-the worktrees group like other history, but the page lifts them out of the
-main worktree table into their own "Ready to clean up" section — the
-section's rows keep the tail-of-group ordering, so the most recently
-merged is first.
+Action-required entries (any group) sort to the head; the `actions` list
+is the global severity+recency ordering of those entries across groups.
+Remaining rows keep the group-local tail ordering, so the most recently
+merged is first among history.
 
 Within a band, most-recent-commit-first; ties preserve collect_git order
-(the sort is stable). Open PRs order among themselves by last activity
-(`updatedAt`, else `createdAt`), drafts after ready ones.
+(the sort is stable).
 
 ## Not implemented / future work
 
