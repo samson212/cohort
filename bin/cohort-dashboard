@@ -495,7 +495,9 @@ def collect_prs(repo):
         status = "degraded"
 
     rc, out, err = gh(root, "pr", "list", "--state", "all", "--limit", "100", "--json",
-                      "number,title,state,url,isDraft,headRefName,createdAt,updatedAt,mergeable,additions,deletions")
+                      "number,title,state,url,isDraft,headRefName,createdAt,updatedAt,"
+                      "mergeStateStatus,reviewDecision,reviewRequests")
+
     if rc != 0 or not out:
         return result, "degraded"
     try:
@@ -503,22 +505,46 @@ def collect_prs(repo):
     except json.JSONDecodeError:
         return result, "degraded"
 
-    open_prs = []
     for pr in prs:
         head = pr.get("headRefName", "")
-        if pr.get("state") == "OPEN":
-            open_prs.append(pr)
         if head:
             result[head] = pr
-    result["__open__"] = open_prs
     return result, status
 
 def enrich(entry, pr):
-    """Attach the four pr_* fields the page reads to an entry."""
+    """Attach the pr_* fields plus a derived action_required label.
+
+    The label is computed here (not in the page) so /api/data is
+    authoritative: it drives the "Action required" section and the
+    sort. Priority (most blocking first):
+
+      mark-ready        PR open but still in draft
+      changes-requested PR open, review asked for changes
+      awaiting-review   PR open & ready, no decision yet
+      ready-to-merge    PR open, review approved, mergeable
+      merged-cleanup    PR merged; worktree/branch still needs cleanup
+    """
     entry["pr_number"] = pr.get("number")
     entry["pr_state"] = pr.get("state")
     entry["pr_draft"] = pr.get("isDraft")
     entry["pr_url"] = pr.get("url")
+    st = (pr.get("state") or "").upper()
+    if st == "OPEN":
+        draft = pr.get("isDraft")
+        decision = (pr.get("reviewDecision") or "").upper()
+        if draft:
+            entry["action_required"] = "mark-ready"
+        elif decision == "CHANGES_REQUESTED":
+            entry["action_required"] = "changes-requested"
+        elif decision == "APPROVED":
+            entry["action_required"] = "ready-to-merge"
+        else:
+            entry["action_required"] = "awaiting-review"
+    elif st == "MERGED":
+        entry["action_required"] = "merged-cleanup"
+    else:
+        entry["action_required"] = None
+
 
 def recency_band(days):
     """0,1,2,3 for <1d, <3d, <7d, older — the recency ladder."""
@@ -534,41 +560,59 @@ def recency_band(days):
 
 def urgency_key(entry):
     """Sort key: lower = more urgent. See dashboard-design.md "Row
-    ordering". Must mirror the page's rowUrgency:
-      0 open PR ready, 1 open PR draft, 2 dirty/unpushed,
-      3 clean (band 0..3 -> 3..6), 9 merged/deleted.
+    ordering". Action-required items sort to the top:
+      0 actionable PR state, 1 dirty/unpushed, 2 clean (band 0..3),
+      9 merged/deleted history.
     """
+    if entry.get("action_required"):
+        return 0
+    if entry.get("dirty_files") or entry.get("ahead"):
+        return 1
     pr_state = entry.get("pr_state") or ""
     if pr_state == "OPEN":
-        return 1 if entry.get("pr_draft") else 0
-    if entry.get("dirty_files") or entry.get("ahead"):
         return 2
     if pr_state == "MERGED" or entry.get("deleted") or entry.get("merged"):
         return 9
     return 3 + recency_band(entry.get("days_since_last_commit"))
 
+def action_sort_key(entry):
+    """Within action_required, order by blocking severity: draft first
+    (someone must mark it ready), then changes-requested, awaiting
+    review, ready-to-merge, then merged-cleanup."""
+    order = {"mark-ready": 0, "changes-requested": 1,
+             "awaiting-review": 2, "ready-to-merge": 3,
+             "merged-cleanup": 4}
+    return order.get(entry.get("action_required"), 5)
+
+
 def sort_groups(repo):
     """Order every row by urgency, recency second — server-side, so
     /api/data reflects the same ordering the page paints. Enrichment has
-    already run and is what fills pr_state/merged; orphan/remote-only
-    groups are mostly history and sink together."""
+    already run and is what fills pr_state/action_required;
+    orphan/remote-only groups are mostly history and sink together.
+    Action-required entries (in worktrees, orphans, or remote_only)
+    surface at the top, ordered by blocking severity.
+
+    repo["actions"] is the global, cross-group list of everything that
+    needs the operator's attention, sorted by severity then recency —
+    the page renders it as-is, so ordering lives in one place."""
     def key(entry):
         days = entry.get("days_since_last_commit")
-        return (urgency_key(entry),
+        return (urgency_key(entry), action_sort_key(entry),
                 days if days is not None else float("inf"))
     for group in (repo.get("worktrees", []),
                   repo.get("orphans", []),
                   repo.get("remote_only", [])):
         group.sort(key=key)
-    # Open PRs: drafts after ready, then most recently updated first.
-    open_prs = repo.get("open_prs", [])
-    def _ts(p):
-        raw = p.get("updatedAt") or p.get("createdAt") or ""
-        try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            return 0.0
-    open_prs.sort(key=lambda p: ((1 if p.get("isDraft") else 0), -_ts(p)))
+    actions = [e for group in (repo.get("worktrees", []),
+                               repo.get("orphans", []),
+                               repo.get("remote_only", []))
+               for e in group if e.get("action_required")]
+    # Global severity+recency order across groups.
+    actions.sort(key=lambda e: (action_sort_key(e),
+                                e.get("days_since_last_commit") or float("inf")))
+    repo["actions"] = actions
+
 
 def status_after_reconcile(entry):
     """Map a worktree to the page's final status vocabulary.
@@ -666,7 +710,6 @@ def collect_gh(payload):
                 pr = prs.get(entry.get("branch", ""))
                 if pr:
                     enrich(entry, pr)
-        repo["open_prs"] = prs.get("__open__", [])
         sort_groups(repo)
     payload["pr_enriched"] = all(s == "ok" for s in statuses)
     payload["pr_error"] = (
@@ -907,17 +950,16 @@ function prBadge(wt, repo) {
     <span class="badge ${st}">#${wt.pr_number}${draft}</span></a>`;
 }
 
-function prRow(pr, repo) {
-  const head = pr.headRefName || '';
-  const headCell = repo ? branchCell(repo, head) : `<td class="branch">${fmt.esc(head)}</td>`;
-  const href = prUrl(repo, pr.url) || fmt.esc(pr.url || '#');
-  return `<tr>${headCell}
-    <td><span class="badge green">#${pr.number} OPEN</span></td>
-    <td><a href="${href}" target="_blank" rel="noopener">${fmt.esc(pr.title)}</a>
-      ${pr.isDraft ? '<span class="draft-dot" title="draft"></span>' : ''}</td>
-    <td>+${pr.additions ?? 0}/−${pr.deletions ?? 0}</td>
-    <td>${fmt.esc(pr.mergeable || '')}</td>
-    <td>${fmt.time(pr.createdAt)}</td></tr>`;
+function actionBadge(a) {
+  const map = {
+    'mark-ready':        ['yellow', 'mark ready'],
+    'changes-requested': ['red',    'changes requested'],
+    'awaiting-review':   ['cyan',   'awaiting review'],
+    'ready-to-merge':    ['green',  'ready to merge'],
+    'merged-cleanup':    ['gray',   'cleanup'],
+  };
+  const [cls, txt] = map[a] || ['gray', a];
+  return `<span class="badge ${cls}">${txt}</span>`;
 }
 
 function render(data) {
@@ -929,22 +971,34 @@ function render(data) {
   }
 
   const views = (data.repos || []).map(repo => {
-    // The server (sort_groups) has already ordered every group — active PRs
-    // first, merged/deleted at the tail. Rows are rendered in payload order.
-    const wts = repo.worktrees || [];
+    // The server (sort_groups) has already ordered every group —
+    // action-required first, merged/deleted at the tail. Rows are
+    // rendered in payload order.
+    const wts = (repo.worktrees || []).filter(w => !w.action_required);
+    // Action-required entries are lifted out of their origin tables into
+    // the "Action required" section — one row per branch, never two.
     const orphans = (repo.orphans || [])
-      .filter(o => o.status === 'merged' || o.status === 'orphan');
-    const open = repo.open_prs || [];
-    const remoteOnly = repo.remote_only || [];
-    // Worktrees whose PR merged and whose branch was deleted on the remote
-    // are cleanup candidates — they surface in their own section (still
-    // sorted into payload order), not the main worktree table. Both
-    // conditions are required: a deleted-but-unmerged branch can't be
-    // cleaned by cohort-cleanup (its tip isn't on the default branch) and
-    // stays in the main table.
-    const done = wts.filter(wt => wt.status === 'deleted' && wt.pr_state === 'MERGED');
-    const active = wts.filter(wt => !(wt.status === 'deleted' && wt.pr_state === 'MERGED'));
-    const rows = active.map(wt => `
+      .filter(o => !o.action_required && (o.status === 'merged' || o.status === 'orphan'));
+    const remoteOnly = (repo.remote_only || []).filter(o => !o.action_required);
+
+    // Everything that needs the operator's attention, across all three
+    // groups. The server builds repo.actions (authoritative ordering);
+    // the page renders them exactly as-is.
+    const actions = repo.actions || [];
+    const actionRows = actions.map(a => `
+      <tr>
+        ${branchCell(repo, a.branch, {
+          onRemote: a.on_remote,
+          deleted: !!a.deleted,
+          sub: a.subject && !a.is_primary ? fmt.esc(a.subject) : '',
+          suffix: a.is_primary ? '<span class="pill" title="primary checkout">main</span>' : ''
+        })}
+        <td>${prBadge(a, repo)}</td>
+        <td>${actionBadge(a.action_required)}</td>
+        <td>${fmt.age(a.days_since_last_commit)} ago</td>
+      </tr>`).join('');
+
+    const rows = wts.map(wt => `
       <tr>
         ${branchCell(repo, wt.branch, {
           onRemote: wt.on_remote,
@@ -958,18 +1012,6 @@ function render(data) {
         <td>${fmt.age(wt.days_since_last_commit)} ago</td>
         <td>${prBadge(wt, repo)}</td>
         <td>${wt.head_short ? (wt.on_remote || wt.deleted ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : `<span>${fmt.esc(wt.head_short)}</span>`) : ''}</td>
-      </tr>`).join('');
-    const doneRows = done.map(wt => `
-      <tr>
-        ${branchCell(repo, wt.branch, {
-          onRemote: wt.on_remote,
-          deleted: true,
-          sub: wt.subject && !wt.is_primary ? fmt.esc(wt.subject) : ''
-        })}
-        <td>${prBadge(wt, repo)}</td>
-        <td><span class="pill gray">merged</span></td>
-        <td><span class="subj">tip merged into ${fmt.esc(repo.default_branch)}</span></td>
-        <td>${wt.head_short ? `<a href="${commitUrl(repo, wt.head)}" target="_blank" rel="noopener">${fmt.esc(wt.head_short)}</a>` : ''}</td>
       </tr>`).join('');
     const orphanRows = orphans.map(o => `
       <tr>
@@ -987,22 +1029,16 @@ function render(data) {
         <td>${fmt.age(o.days_since_last_commit)} ago</td>
         <td colspan="2">${o.head_short ? (o.on_remote !== false || o.deleted ? `<a href="${commitUrl(repo, o.head)}" target="_blank" rel="noopener">${fmt.esc(o.head_short)}</a>` : `<span>${fmt.esc(o.head_short)}</span>`) : ''}</td>
       </tr>`).join('');
-    const prRows = open.map(pr => prRow(pr, repo)).join('');
     return `
       <h2>${fmt.esc(repo.name)} <span class="sub">· ${fmt.esc(repo.root)}</span></h2>
+      ${actions.length ? `
+        <h2>Action required <span class="count">${actions.length}</span></h2>
+        <table><thead><tr><th>branch</th><th>PR</th><th>action</th><th>age</th></tr></thead>
+        <tbody>${actionRows}</tbody></table>` : ''}
       <table>
         <thead><tr><th>branch</th><th>state</th><th>changes</th><th>vs origin</th><th>age</th><th>PR</th><th>head</th></tr></thead>
         <tbody>${rows || '<tr><td class="empty" colspan="7">no worktrees</td></tr>'}</tbody>
       </table>
-      ${done.length ? `
-        <h2>Ready to clean up <span class="count">${done.length}</span></h2>
-        <p class="hint">PR merged, branch deleted from the remote — the worktree can be removed with <code>cohort-cleanup</code>.</p>
-        <table><thead><tr><th>branch</th><th>PR</th><th>state</th><th>merged into</th><th>head</th></tr></thead>
-        <tbody>${doneRows}</tbody></table>` : ''}
-      ${open.length ? `
-        <h2>Open pull requests</h2>
-        <table><thead><tr><th>branch</th><th>state</th><th>title</th><th>diff</th><th>mergeable</th><th>created</th></tr></thead>
-        <tbody>${prRows}</tbody></table>` : ''}
       ${remoteOnly.length ? `
         <h2>Remote branches without local worktrees</h2>
         <table><thead><tr><th>branch</th><th>state</th><th>subject</th><th>age</th><th></th></tr></thead>

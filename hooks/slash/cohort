@@ -10,6 +10,13 @@
 #
 # Install: ~/.cohort/bin/cohort-init (symlinks this file once per skill
 #   in the skills/ registry, and removes stale names).
+#
+# cohort-skill is resolved by path, not PATH: the slash hook runs under
+# whatever environment the harness (Shelley, systemd, etc.) gives the
+# hook process, and ~/.cohort/bin is not guaranteed to be on that PATH.
+# Deriving the engine root from the hook's own symlink — the same
+# convention system-prompt and cohort-init use — keeps the invocation
+# working everywhere.
 set -e
 
 skill_name=$(basename "$0")
@@ -19,4 +26,6 @@ if [[ "$skill_name" != cohort-* ]]; then
     exit 1
 fi
 
-exec cohort-skill "$skill_name" "$@"
+SELF=$(readlink -f "$0")
+ENGINE_ROOT=$(dirname "$(dirname "$(dirname "$SELF")")")
+exec "$ENGINE_ROOT/bin/cohort-skill" "$skill_name" "$@"
