@@ -97,35 +97,54 @@ else
     echo "Installed hook: $HOOK_DST -> $HOOK_SRC"
 fi
 
-# 4. Install the slash hooks (/cohort-* commands)
+# 3. Install the slash hook(s): one dispatcher symlinked per skill name.
 SLASH_SRC_DIR="$ENGINE_ROOT/hooks/slash"
 SLASH_DST_DIR="$HOME/.config/shelley/hooks/slash"
+SKILLS_DIR="$ENGINE_ROOT/skills"
 mkdir -p "$SLASH_DST_DIR"
-for hook_src in "$SLASH_SRC_DIR"/cohort-*; do
-    [[ -f "$hook_src" ]] || continue
-    hook_name=$(basename "$hook_src")
-    hook_dst="$SLASH_DST_DIR/$hook_name"
+
+DISPATCHER="$SLASH_SRC_DIR/cohort"
+if [[ ! -f "$DISPATCHER" ]]; then
+    echo "Error: slash dispatcher hook not found at $DISPATCHER" >&2
+    exit 1
+fi
+
+# Symlink the dispatcher once per skill in the registry
+# (skills/cohort-<name>/SKILL.md). The registry is the source of truth —
+# adding a skill dir makes /cohort-<name> work; removing one drops it.
+installed_any=0
+for skill_dir in "$SKILLS_DIR"/cohort-*/; do
+    [[ -d "$skill_dir" ]] || continue
+    skill_name=$(basename "$skill_dir")
+    [[ "$skill_name" == cohort-* ]] || continue
+    [[ -f "$skill_dir/SKILL.md" ]] || continue
+    hook_dst="$SLASH_DST_DIR/$skill_name"
     if [[ -L "$hook_dst" ]]; then
         CURRENT_TARGET=$(readlink -f "$hook_dst")
-        WANTED_TARGET=$(readlink -f "$hook_src")
-        if [[ "$CURRENT_TARGET" == "$WANTED_TARGET" ]]; then
+        if [[ "$CURRENT_TARGET" == "$(readlink -f "$DISPATCHER")" ]]; then
             echo "Slash hook already installed: $hook_dst"
         else
-            ln -sf "$hook_src" "$hook_dst"
-            echo "Slash hook relinked: $hook_dst -> $hook_src (was -> $CURRENT_TARGET)"
+            ln -sf "$DISPATCHER" "$hook_dst"
+            echo "Slash hook relinked: $hook_dst -> $DISPATCHER (was -> $CURRENT_TARGET)"
         fi
     else
-        ln -sf "$hook_src" "$hook_dst"
-        echo "Installed slash hook: $hook_dst -> $hook_src"
+        ln -sf "$DISPATCHER" "$hook_dst"
+        echo "Installed slash hook: $hook_dst -> $DISPATCHER"
     fi
+    installed_any=1
 done
 
-# Remove any stale slash hooks for commands that no longer exist (e.g. the
-# old /cohort-close name) so a renamed command doesn't linger.
+if [[ "$installed_any" == "0" ]]; then
+    echo "Warning: no skills found in $SKILLS_DIR (no slash hooks installed)" >&2
+fi
+
+# Remove stale slash hooks: any cohort-* hook in the destination that does
+# not correspond to a skill dir in the registry (or that points at engine
+# files that no longer exist) is removed.
 for hook_dst in "$SLASH_DST_DIR"/cohort-*; do
     [[ -L "$hook_dst" ]] || continue
-    hook_src="$SLASH_SRC_DIR/$(basename "$hook_dst")"
-    if [[ ! -e "$hook_src" ]]; then
+    skill_name=$(basename "$hook_dst")
+    if [[ ! -d "$SKILLS_DIR/$skill_name" ]]; then
         rm "$hook_dst"
         echo "Removed stale slash hook: $hook_dst"
     fi

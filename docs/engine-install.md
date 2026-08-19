@@ -12,10 +12,10 @@ projects via a thin `.cohort/` directory.
   bin/                      # scripts (add ~/.cohort/bin to PATH: cohort-gh, cohort-new-worktree, …)
   agents/cohort/            # universal prompt.md + symlinked docs
   docs/                     # canonical docs
-  commands/                 # slash command prompts
+  skills/                   # slash-command skills: skills/cohort-<name>/SKILL.md
   hooks/
     system-prompt           # auto-loads Cohort docs into every prompt
-    slash/                  # /cohort-* command hooks (expand commands/*.md)
+    slash/cohort            # renders /cohort-* invocations from the skills/ registry
   install.sh                # curl-pipeable installer
 
 ~/my-project/               # Shelley opens HERE
@@ -69,9 +69,10 @@ The dashboard then serves on port 6283 (`http://localhost:6283/`;
 on exe.dev, `https://<vm>.exe.xyz:6283/`).
 
 This scaffolds `.cohort/` and installs the system-prompt hook **and** the
-`/cohort-*` slash hooks (`hooks/slash/`). `cohort-init` symlinks the
-slash hooks into `~/.config/shelley/hooks/slash/` alongside `system-prompt`,
-and removes any stale ones (e.g. a renamed command) automatically. The
+`/cohort-*` slash hooks (`hooks/slash/cohort`, symlinked once per skill
+name in `skills/`). `cohort-init` writes them into
+`~/.config/shelley/hooks/slash/` alongside `system-prompt`, and removes
+any stale ones (e.g. renamed or removed skills) automatically. The
 system-prompt hook loads universal docs from the engine, then layers on
 `.cohort/` deltas (project prompt at highest recency).
 

@@ -1,0 +1,40 @@
+#!/bin/bash
+# cohort-skill: render a Cohort skill's SKILL.md as the full prompt.
+#
+# The load-bearing artifact is the portable skill registry at
+# skills/cohort-<name>/SKILL.md (agent-skills standard: `name`,
+# `description` frontmatter, $ARGUMENTS substitution). This script is a
+# thin renderer for harnesses that don't load skills natively (Shelley):
+# it cats the SKILL.md so the /cohort-* invocation becomes the full skill
+# text for the model. Claude Code, Pi, and Codex read the same files
+# directly from skills/ — no copy, no translation.
+#
+# Usage: cohort-skill <name> [arguments...]
+#   Arguments are joined and substituted for $ARGUMENTS in the SKILL.md
+#   body, mirroring the standard's substitution semantics. Empty when none.
+#   Shelley passes them via $SHELLEY_SLASH_ARGS when invoked from a hook.
+set -e
+
+SKILL_NAME="${1:?usage: cohort-skill <skill-name> [args...]}"
+shift || true
+
+# Shelley's slash hooks pass the argument string in the environment.
+if [[ -z "$*" && -n "${SHELLEY_SLASH_ARGS:-}" ]]; then
+    # shellcheck disable=SC2086  (intentional word-split of the env string)
+    set -- $SHELLEY_SLASH_ARGS
+fi
+
+SELF=$(readlink -f "$0")
+ENGINE_ROOT=$(dirname "$(dirname "$SELF")")
+SKILL_FILE="$ENGINE_ROOT/skills/$SKILL_NAME/SKILL.md"
+
+if [[ ! -f "$SKILL_FILE" ]]; then
+    echo "cohort-skill: unknown skill '$SKILL_NAME' (no $SKILL_FILE)" >&2
+    exit 1
+fi
+
+ARGUMENTS="$*"
+# Escape sed metacharacters in the replacement so args containing
+# slashes, ampersands, or backslashes can't corrupt the skill text.
+ARGUMENTS_ESC=$(printf '%s' "$ARGUMENTS" | sed 's/[&\\/]/\\&/g')
+sed "s/\$ARGUMENTS/$ARGUMENTS_ESC/g" "$SKILL_FILE"
