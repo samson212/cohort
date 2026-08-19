@@ -17,6 +17,7 @@ gives a one-liner — nothing more, so it never drifts from the source
 | `/cohort-sync` | `skills/cohort-sync/SKILL.md` | Fetch, show commits, push, display result |
 | `/cohort-pr` | `skills/cohort-pr/SKILL.md` | Create draft PR or update description for the current branch |
 | `/cohort-cleanup` | `skills/cohort-cleanup/SKILL.md` | Check unresolved comments, hand off merge, clean up worktree/branch, update main |
+| `/cohort-update` | `skills/cohort-update/SKILL.md` | Update the Cohort engine to the latest main |
 
 Invocation equivalents on other harnesses: Claude Code auto-registers a skill
 at `skills/cohort-save/SKILL.md` as `/cohort-save`; Pi exposes it as

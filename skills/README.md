@@ -18,3 +18,4 @@ with the args passed after the command name. See `bin/cohort-skill`.
 | `cohort-sync` | Sync with the remote, show unpushed commits, push |
 | `cohort-pr` | Create/update a pull request (always a draft) |
 | `cohort-cleanup` | Close out a merged PR — clean up worktree/branch, update main |
+| `cohort-update` | Update the Cohort engine to the latest main |
