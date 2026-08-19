@@ -43,7 +43,8 @@ one page so an operator can see, at a glance:
 - which branches are ahead of / behind their upstream or the default branch
 - which PRs are open, draft, or merged for each branch
 - which branches exist locally but were never pushed (unlinked, no decoration)
-- which branches were deleted from the remote after their PR merged (rendered grey)
+- which branches were deleted from the remote after their PR merged (rendered grey
+  in a dedicated "Ready to clean up" section)
 - which branches exist only on the remote (no local ref, no worktree)
 - which local branches no longer have a worktree (cleanup candidates)
 
@@ -173,6 +174,16 @@ or fails, the labels never leak collect_git's intermediate
 | `dirty` | uncommitted changes present | PR page, else compare |
 | `unpushed` | ahead of upstream (commits not pushed) | PR, else compare |
 | `deleted` | was on the remote, branch removed after merge | PR page, else none |
+
+A worktree with `deleted` status **and a `MERGED` PR** is a cleanup
+candidate: its PR was merged and the branch head was removed upstream, so
+`cohort-cleanup` can remove the worktree. The page collects these into a
+dedicated **"Ready to clean up"** section above the Open-PRs table instead
+of the main worktree table — one glance shows what can be cleaned today.
+A worktree that is `deleted` without a `MERGED` PR (branch removed without
+merging, or gh unavailable) stays in the main table: `cohort-cleanup` would
+refuse it (its tip isn't an ancestor of the default branch), so it isn't
+"ready."
 | `up to date` | clean, exists on the remote | tree page (or PR) |
 | `local` | clean, never pushed / no upstream | none (unlinked) |
 
@@ -180,7 +191,10 @@ or fails, the labels never leak collect_git's intermediate
 deleted from the remote loses its tree/compare links and its name renders
 grey — its PR page (if any) and head-SHA link (the merged commit
 lives in the default branch) still link. `local` branches are unlinked and
-plain: no decoration, they just don't link.
+plain: no decoration, they just don't link. Cleanup-candidate rows (the
+"Ready to clean up" section) render their branch grey, their PR badge, a
+"merged" pill, and the target branch they were merged into; the rest of the
+row's cells are not applicable (clean, not ahead, no tree page).
 
 `dirty` wins. If there is a PR for the branch, its PR page is linked
 regardless of status.
@@ -367,6 +381,12 @@ rows exactly in payload order:
    <7d, older): recent commits are important, so hot branches float.
 4. **Merged / deleted-upstream / abandoned** — history, sinking to the
    bottom (the bulk of the `orphans` and `remote_only` lists).
+
+Cleanup candidates (deleted worktrees with merged PRs) sort to the tail of
+the worktrees group like other history, but the page lifts them out of the
+main worktree table into their own "Ready to clean up" section — the
+section's rows keep the tail-of-group ordering, so the most recently
+merged is first.
 
 Within a band, most-recent-commit-first; ties preserve collect_git order
 (the sort is stable). Open PRs order among themselves by last activity
