@@ -402,9 +402,26 @@ def collect_git(repos_override=None):
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "repos": [scan_repo(r) for r in unique],
+        # The user's repos first; the engine (Cohort itself) sinks to the
+        # tail — whoever installed Cohort cares about their own projects,
+        # and cohort is only scaffolding for them.
+        "repos": sorted(
+            (scan_repo(r) for r in unique),
+            key=lambda repo: repo["root"] == engine_root(),
+        ),
     }
     return payload
+
+
+def engine_root():
+    """Canonical root of the Cohort engine repo (where this script ships).
+
+    Resolution goes through the same common-git-dir logic the dedup uses,
+    so running from a worktree copy still names the primary checkout — the
+    exact key the engine repo's payload entry carries.
+    """
+    here = os.path.dirname(os.path.realpath(__file__))
+    return git_common_root_of(here) or git_root_of(here)
 
 # ── gh collection ────────────────────────────────────────────────
 
