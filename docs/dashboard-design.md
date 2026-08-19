@@ -101,8 +101,8 @@ One JSON document per scrape:
   "pr_error": null,                # set when gh failed (non-fatal)
   "repos": [
     {
-      "root": "/home/exedev/cohort",   # primary checkout (dedup canonical)
-      "name": "cohort",
+      "root": "/home/exedev/major",   # primary checkout (dedup canonical)
+      "name": "major",
       "remote": "…",
       "web": "https://github.com/…",   # canonical browser URL (gh-derived)
       "default_branch": "main",
@@ -110,10 +110,19 @@ One JSON document per scrape:
       "orphans": [ … ],                # local branches w/o worktree
       "remote_only": [ … ],            # remote branches w/o local ref
       "open_prs": [ … ]                # OPEN PRs for the repo
-    }
+    },
+    … # further repos; the Cohort engine repo always sorts LAST
   ]
 }
 ```
+
+### repo ordering
+
+The engine repo is identified by the canonical root of the directory this
+script ships in (`git_common_root_of(__file__)`, the same common-git-dir
+dedup the scanner uses), and its entry is moved to the tail of `repos`.
+All other repos keep discovery order. This is computed in `collect_git`
+so `--json-only` and the server agree.
 
 ### worktree entry
 
