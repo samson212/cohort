@@ -25,15 +25,18 @@ When Cohort spins up a subagent, it tells the subagent to
 `cat agents/<role>/*.md` so those docs join the already-loaded universal
 context.
 
-## slash/cohort-*
+## slash/cohort
 
 Pluggable slash commands. When a user sends a message starting with
-`/cohort-*` (commit, push, pr, cleanup), Shelley runs the matching
-`hooks/slash/cohort-<name>` hook; its stdout replaces the user message.
-Each hook cats the corresponding prompt in `commands/cohort-<name>.md` —
-frontmatter and all — so `/cohort-save` becomes the full procedure text
-for the LLM to follow.
+`/cohort-*` (save, sync, pr, cleanup), Shelley runs the matching hook in
+`~/.config/shelley/hooks/slash/` — one shared dispatcher file, symlinked
+under each skill name by `cohort-init`; its stdout replaces the user
+message. The dispatcher resolves the invocation name to `cohort-skill`,
+which cats the corresponding `skills/cohort-<name>/SKILL.md` — frontmatter
+and all — so `/cohort-save` becomes the full skill text for the model.
 
-The prompt file in `commands/` is the single source of truth; the hooks
-are dumb readers. `cohort-init` installs these symlinks and removes stale
-ones for commands that no longer exist.
+The skill file in `skills/` is the single source of truth (agent-skills
+standard: `name` + `description` frontmatter, `$ARGUMENTS` substitution).
+The hook and loader are dumb renderers, and the same skill files are read
+directly by Claude Code, Pi, and Codex — see `docs/portability.md`.
+`cohort-init` installs the `cohort` hook symlink and removes stale ones.

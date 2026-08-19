@@ -1,4 +1,5 @@
 ---
+name: cohort-cleanup
 description: Check unresolved comments, hand off the merge, then clean up worktree and branch
 ---
 

@@ -1,4 +1,5 @@
 ---
+name: cohort-save
 description: Review everything changed, stage what belongs, draft a message, commit, then display the message
 ---
 

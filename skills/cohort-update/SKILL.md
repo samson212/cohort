@@ -1,4 +1,5 @@
 ---
+name: cohort-update
 description: Update the Cohort engine to the latest main
 ---
 

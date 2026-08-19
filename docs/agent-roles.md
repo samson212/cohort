@@ -35,12 +35,13 @@ provide.
   walks `agents/cohort/` on every turn: `prompt.md` first, then symlinked
   `*.md` in alphabetical order. Cohort loads the remaining agents' docs by
   having them `cat` their own `agents/<role>/` directory.
-- **`commands/`** — Skills. Loaded on invocation via the `hooks/slash/`
-  hooks, not always present. Each file is a self-contained prompt the
+- **`skills/`** — Skills (slash commands). Loaded on invocation: the
+  `hooks/slash/cohort` hook renders `skills/cohort-<name>/SKILL.md` in
+  place of `/cohort-<name>`. Each file is a self-contained prompt the
   agent follows when the corresponding slash command is called.
 - **`hooks/`** — Lifecycle. `system-prompt` auto-injects Cohort's context;
-  `slash/` contains the `/cohort-*` command hooks that expand a bare slash
-  message into the full prompt text.
+  `slash/cohort` renders the `/cohort-*` skills from the `skills/`
+  registry.
 - **`bin/`** — Executable scripts. Recipes that must run the same way every
   time — creating worktrees, cleaning up after a merge, updating the engine —
   live here so no agent can improvise around them. With `~/.cohort/bin` on
@@ -52,6 +53,7 @@ provide.
 The entrypoint agent. Coordinates subagents, delegates work, and makes
 decisions that require awareness of all conventions.
 - Has: `/cohort-save`, `/cohort-sync`, `/cohort-pr`, `/cohort-cleanup`
+  (skills in `skills/`, rendered via `hooks/slash/cohort`)
 - Universal docs: `agents/cohort/` (auto-loaded by `hooks/system-prompt` on
   every turn, including subagents) — symlinked into this directory
 

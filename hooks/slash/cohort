@@ -1,0 +1,22 @@
+#!/bin/bash
+# slash/cohort: resolve a /cohort-* invocation to the matching skill.
+#
+# Shelley has no native skills loader, and its slash-hook dispatch runs a
+# hook per command name. This one file is symlinked under each skill name
+# (cohort-save, cohort-sync, cohort-pr, cohort-cleanup, ...); its stdout
+# replaces the /cohort-* message with the corresponding SKILL.md text.
+# The skill files are load-bearing — the same files Claude Code, Pi, and
+# Codex read natively. See bin/cohort-skill and skills/README.
+#
+# Install: ~/.cohort/bin/cohort-init (symlinks this file once per skill
+#   in the skills/ registry, and removes stale names).
+set -e
+
+skill_name=$(basename "$0")
+
+if [[ "$skill_name" != cohort-* ]]; then
+    echo "slash/cohort: must be invoked under a cohort-* name (was '$skill_name')" >&2
+    exit 1
+fi
+
+exec cohort-skill "$skill_name" "$@"
