@@ -21,6 +21,18 @@ git fetch origin
 echo "Fast-forwarding to origin/main..."
 if git merge --ff-only origin/main; then
     echo "Updated: $(git log -1 --oneline)"
+
+    # The dashboard unit runs bin/cohort-dashboard from the engine checkout;
+    # the running process keeps executing the old script from memory after a
+    # fast-forward, so restart the user unit to pick up the new main.
+    # Guarded: not every user has the dashboard installed.
+    if systemctl --user cat cohort-dashboard.service >/dev/null 2>&1; then
+        echo "Restarting cohort-dashboard.service..."
+        systemctl --user restart cohort-dashboard.service
+        if ! systemctl --user is-active --quiet cohort-dashboard.service; then
+            echo "Warning: cohort-dashboard.service failed to restart; check with: systemctl --user status cohort-dashboard" >&2
+        fi
+    fi
 else
     echo "Cannot fast-forward — local main has diverged from origin/main." >&2
     echo "This shouldn't happen if development is done in worktrees." >&2
