@@ -1,0 +1,1 @@
+../../docs/browser-diagnosis.md
